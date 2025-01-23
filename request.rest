@@ -1,0 +1,29 @@
+GET http://localhost:3000/
+authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwYXlsb2FkIjp7InVzZXJuYW1lIjoiZW1tYXdpbHNvbjc4OSJ9LCJpYXQiOjE3MzA1NTEyNTcsImV4cCI6MTczMDU1MTI3N30.aRPhAYFiqUBTHiKztp_ybMsk5G5otWYyOYPBQNCjEYs
+###
+POST http://localhost:3000/login
+Content-Type: application/json
+
+{
+  "username": "emmawilson789", 
+  "password": "emmasafepwd"
+}
+###
+POST http://localhost:3000/signup
+Content-Type: application/json
+
+{
+    "role": "customer",
+    "name": "Alice Green",
+    "address": "123 Maple Ave, Springfield",
+    "bio": "Book enthusiast and yoga lover",
+    "email": "alice.green12a3@example.com",
+    "phone": "5552013211",
+    "username": "alicegreen1a23",
+    "password": "12345678"
+}
+
+
+
+
+
