@@ -4,6 +4,8 @@ const ReservedTable = require("../models/reservation_table.model");
 const sequelize = require("../config/db.config"); // Đảm bảo import sequelize để sử dụng transaction
 const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
+const emailService = require("../services/send-email.service");
+const { getUserByUserId } = require("../services/user.service");
 
 const getAllOrders = async (req, res) => {
   try {
@@ -13,7 +15,6 @@ const getAllOrders = async (req, res) => {
     res.status(500).json({ error: "Error fetching orders" });
   }
 };
-
 
 const getAllOrdersInfo = async (req, res) => {
   try {
@@ -116,7 +117,7 @@ const createOrder = async (req, res) => {
   const transaction = await sequelize.transaction(); // Khởi tạo transaction
   try {
     let { start_time, num_people, items, ...orderData } = req.body; // Số lượng khách và danh sách các món hàng
-
+    const user = await getUserByUserId(req.user.id);
     // Tạo order mới trong transaction
     const newOrder = await orderService.createOrder(
       {
@@ -204,6 +205,12 @@ const createOrder = async (req, res) => {
 
       // Commit transaction khi tất cả các thao tác thành công
       await transaction.commit();
+
+      await emailService.sendOrderConfirmationEmail(
+        user.email,
+        user.name,
+        newOrder
+      );
 
       // Trả về kết quả order đã tạo
       res.status(201).json(newOrder);
