@@ -6,7 +6,7 @@ const { Auth } = require("two-step-auth");
 
 const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find();
+    const users = await userService.getAllUsers();
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: "Error fetching users" });
@@ -66,7 +66,10 @@ const login = async (req, res) => {
       });
     }
 
-    const isPasswordValid = await userService.validatePassword(password, user.password);
+    const isPasswordValid = await userService.validatePassword(
+      password,
+      user.password
+    );
     if (!isPasswordValid) {
       return res.status(401).send("Password incorrect!");
     }
@@ -137,7 +140,10 @@ const refreshToken = async (req, res) => {
 
   try {
     const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
-    const decoded = await authUtil.verifyToken(refreshToken, refreshTokenSecret);
+    const decoded = await authUtil.verifyToken(
+      refreshToken,
+      refreshTokenSecret
+    );
 
     const dataForAccessToken = {
       username: decoded.payload.username,
@@ -181,7 +187,10 @@ const updateUser = async (req, res) => {
       return res.status(400).send("No fields to update.");
     }
 
-    const updatedUser = await userService.updateUser(req.user.username, otherFields);
+    const updatedUser = await userService.updateUser(
+      req.user.username,
+      otherFields
+    );
     if (!updatedUser) {
       return res.status(404).send("User not found!");
     }
@@ -200,7 +209,10 @@ const deleteUser = async (req, res) => {
   let { password } = req.body;
   try {
     const user = await userService.getUserByUserName(req.user.username);
-    const isPasswordValid = await userService.validatePassword(password, user.password);
+    const isPasswordValid = await userService.validatePassword(
+      password,
+      user.password
+    );
     if (!isPasswordValid) {
       return res.status(401).send("Password incorrect!");
     }
@@ -219,11 +231,16 @@ const sendOTP = async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || typeof email !== "string" || !/\S+@\S+\.\S+/.test(email)) {
-      return res.status(400).json({ status: "Error", message: "Invalid email address" });
+      return res
+        .status(400)
+        .json({ status: "Error", message: "Invalid email address" });
     }
 
     const res1 = await Auth(email, "");
-    console.log("OTP sent successfully:", { email: res1.mail, success: res1.success });
+    console.log("OTP sent successfully:", {
+      email: res1.mail,
+      success: res1.success,
+    });
 
     return res.status(200).json({
       status: "Success",
@@ -238,6 +255,31 @@ const sendOTP = async (req, res) => {
   }
 };
 
+const searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+
+    if (!query || query.trim() === "") {
+      return res.status(400).send("Search query is required.");
+    }
+
+    const decodedQuery = decodeURIComponent(query.replace(/\+/g, " "));
+    const users = await userService.searchUsers(decodedQuery);
+    res.status(200).json(users);
+  } catch (error) {
+    console.error("Controller error:", error);
+    res.status(500).json({ error: error.message || "Error searching users" });
+  }
+};
+
+function removeVietnameseAccents(str) {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
 module.exports = {
   getAllUsers,
   userInfo,
@@ -248,4 +290,5 @@ module.exports = {
   updateUser,
   deleteUser,
   sendOTP,
+  searchUsers, // Thêm hàm tìm kiếm
 };

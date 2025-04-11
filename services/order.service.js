@@ -15,21 +15,36 @@ async function createOrder(orderData) {
   }
 }
 
-async function checkAvailableTables(startTime, endTime) {
+async function checkUnavailableTables(startTime, endTime, tableIds, excludeOrderId = null) {
   try {
-    const reservedTables = await ReservationTable.find({
+    const conditions = {
+      table_id: { $in: tableIds },
       $or: [
         { start_time: { $lt: endTime }, end_time: { $gt: startTime } }
       ]
-    }).distinct('table_id');
+    };
+    if (excludeOrderId) {
+      conditions.reservation_id = { $ne: excludeOrderId };
+    }
 
-    const availableTables = await TableInfo.find({
-      table_number: { $nin: reservedTables }
-    });
+    // Lấy danh sách reservation
+    const reservations = await ReservationTable.find(conditions);
+    // Lọc các reservation liên quan đến đơn hàng không phải completed hoặc canceled
+    const activeReservations = await Promise.all(
+      reservations.map(async (reservation) => {
+        const order = await OrderDetail.findById(reservation.reservation_id);
+        if (order && !['completed', 'canceled'].includes(order.status)) {
+          return reservation.table_id;
+        }
+        return null;
+      })
+    );
 
-    return availableTables.length > 0 ? availableTables : null;
+    // Lọc ra các table_id không null (tức là không khả dụng)
+    const reservedTables = activeReservations.filter(tableId => tableId !== null);
+    return [...new Set(reservedTables)]; // Loại bỏ trùng lặp
   } catch (error) {
-    console.error("Error checking available tables:", error);
+    console.error("Error checking unavailable tables:", error);
     throw error;
   }
 }
@@ -42,20 +57,16 @@ async function createReservations(reservedTables) {
 
     const createdReservations = [];
     for (let reservationData of reservedTables) {
-      const { reservation_id, table_id, start_time, people_assigned } = reservationData;
-      const end_time = new Date(start_time);
-      end_time.setMinutes(end_time.getMinutes() + (parseInt(process.env.RESERVATION_DURATION_MINUTES) || 120));
+      const { reservation_id, table_id, start_time, end_time } = reservationData;
 
       const table = await TableInfo.findOne({ table_number: table_id });
       if (!table) throw new Error(`Table with number ${table_id} not found`);
-      if (table.capacity < people_assigned) throw new Error(`Table ${table_id} does not have enough capacity`);
 
       const newReservation = new ReservationTable({
         reservation_id,
         table_id,
         start_time,
-        end_time,
-        people_assigned
+        end_time
       });
       await newReservation.save();
       createdReservations.push(newReservation);
@@ -70,7 +81,7 @@ async function createReservations(reservedTables) {
 async function createItemOrders(itemOrders) {
   try {
     if (!itemOrders || itemOrders.length === 0) {
-      throw new Error("No items to create");
+      return [];
     }
     const createdItemOrders = await ItemOrder.insertMany(itemOrders);
     return createdItemOrders;
@@ -112,12 +123,48 @@ async function updateTable(table_number, updatedData) {
   }
 }
 
+async function getAvailableTables(startTime, endTime) {
+  try {
+    // Lấy danh sách các reservation trong khoảng thời gian
+    const reservations = await ReservationTable.find({
+      $or: [
+        { start_time: { $lt: endTime }, end_time: { $gt: startTime } }
+      ]
+    });
+
+    // Lọc các reservation liên quan đến đơn hàng không phải completed hoặc canceled
+    const activeReservations = await Promise.all(
+      reservations.map(async (reservation) => {
+        const order = await OrderDetail.findById(reservation.reservation_id);
+        if (order && !['completed', 'canceled'].includes(order.status)) {
+          return reservation.table_id;
+        }
+        return null;
+      })
+    );
+
+    // Lấy danh sách table_id không khả dụng
+    const reservedTableIds = activeReservations.filter(tableId => tableId !== null);
+
+    // Lấy tất cả các bàn từ TableInfo và lọc ra các bàn khả dụng
+    const availableTables = await TableInfo.find({
+      table_number: { $nin: reservedTableIds }
+    });
+
+    return availableTables;
+  } catch (error) {
+    console.error("Error fetching available tables:", error);
+    throw new Error("Error fetching available tables");
+  }
+}
+
 module.exports = {
   createOrder,
   createReservations,
-  checkAvailableTables,
+  checkUnavailableTables,
   updateTable,
   getTableByTableNumber,
   createItemOrders,
-  updateOrder
+  updateOrder,
+  getAvailableTables,
 };

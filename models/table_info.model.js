@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const tableInfoSchema = new mongoose.Schema({
-  table_number: { type: Number, required: true, unique: true },
+  table_number: { type: Number, required: true, unique: true, index: true },
   capacity: { type: Number, required: true }
 }, { timestamps: false });
 

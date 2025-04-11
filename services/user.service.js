@@ -1,6 +1,70 @@
 const bcrypt = require("bcrypt");
 const User = require("../models/user.model");
 
+async function getAllUsers() {
+  try {
+    const users = await User.find();
+    return users;
+  } catch (error) {
+    console.error("Error fetching all users:", error);
+    throw new Error("Error fetching all users");
+  }
+}
+
+async function getUserById(id) {
+  try {
+    const user = await User.findById(id);
+    if (!user) throw new Error("User không tồn tại");
+    return user;
+  } catch (error) {
+    console.error("Error fetching user by ID:", error);
+    throw error;
+  }
+}
+
+async function searchUsers(query) {
+  try {
+    if (!query || typeof query !== "string") {
+      return [];
+    }
+
+    // Chuẩn hóa chuỗi tìm kiếm
+    const normalizedQuery = removeVietnameseAccents(query.trim()).toLowerCase();
+
+    // Tạo điều kiện tìm kiếm
+    const conditions = {
+      $or: [
+        // Tìm kiếm theo tên (nameNoAccents)
+        { nameNoAccents: { $regex: new RegExp(normalizedQuery, "i") } },
+        // Tìm kiếm theo số điện thoại
+        { phone: { $regex: new RegExp(normalizedQuery, "i") } },
+        { address: { $regex: new RegExp(normalizedQuery, "i") } },
+      ],
+    };
+
+    // Kiểm tra nếu query có thể là ID (MongoDB ObjectId có 24 ký tự hex)
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(query);
+    if (isObjectId) {
+      conditions.$or.push({ _id: query });
+    }
+
+    const users = await User.find(conditions);
+    console.log("Found users:", users); // Debug
+    return users;
+  } catch (error) {
+    console.error("Error searching users:", error.message, error.stack);
+    throw new Error(`Error searching users: ${error.message}`);
+  }
+}
+
+function removeVietnameseAccents(str) {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+}
+
 async function isUserExists(criteria) {
   const conditions = {};
   if (criteria.email) conditions.email = criteria.email;
@@ -76,6 +140,9 @@ const deleteUser = async (username) => {
 };
 
 module.exports = {
+  getAllUsers,
+  getUserById,
+  searchUsers,
   isUserExists,
   createUser,
   getUserByUserId,
