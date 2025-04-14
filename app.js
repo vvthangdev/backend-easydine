@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
+const path = require("path");
 const { Server } = require("socket.io");
 const { createServer } = require("node:http");
 const server = createServer(app);
@@ -14,6 +15,13 @@ app.use(express.json()); // Xử lý JSON nếu cần
 
 require("dotenv").config();
 const os = require("os");
+
+app.use(express.static(path.join(__dirname, "public")));
+
+// Route để trả về index.html khi truy cập /
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 const connectDB = require("./config/db.config.js");
 const userRoutes = require("./routes/user.routes");
