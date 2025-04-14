@@ -41,10 +41,19 @@ app.use("/vouchers", voucherRouter);
 
 const PORT = process.env.PORT || 8080;
 
+// connectDB()
+//   .then(() => {
+//     server.listen(PORT, () => {
+//       console.log(`Server is running on http://localhost:${PORT}/`);
+//     });
+//   })
+//   .catch((err) => {
+//     console.error("Unable to connect to the database:", err);
+//   });
 connectDB()
   .then(() => {
-    server.listen(PORT, () => {
-      console.log(`Server is running on http://localhost:${PORT}/`);
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server is running on http://0.0.0.0:${PORT}/`);
     });
   })
   .catch((err) => {
