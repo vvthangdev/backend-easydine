@@ -1,57 +1,111 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trang cá nhân của Vũ Văn Thăng</title>
+    <title>Vu Van Thang's Personal Page</title>
     <style>
       body {
-        font-family: Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
         display: flex;
         justify-content: center;
         align-items: center;
-        height: 100vh;
+        min-height: 100vh;
         margin: 0;
-        background-color: #f0f2f5;
+        background: linear-gradient(180deg, #1c2526 0%, #2c3e50 100%);
+        overflow: hidden;
+        color: #ffffff;
       }
       .profile-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        background: rgba(40, 44, 52, 0.95);
+        backdrop-filter: blur(12px);
+        padding: 40px;
+        border-radius: 24px;
+        box-shadow: 0 10px 50px rgba(0, 0, 0, 0.3);
         text-align: center;
-        max-width: 400px;
-        width: 100%;
+        max-width: 420px;
+        width: 90%;
+        transition: transform 0.4s ease, box-shadow 0.4s ease;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .profile-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 15px 60px rgba(0, 0, 0, 0.4);
       }
       .profile-card img {
-        width: 150px;
-        height: 150px;
+        width: 140px;
+        height: 140px;
         border-radius: 50%;
         object-fit: cover;
-        margin-bottom: 15px;
+        margin-bottom: 24px;
+        border: 4px solid #ffffff;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+        transition: transform 0.3s ease;
+      }
+      .profile-card img:hover {
+        transform: scale(1.05);
       }
       .profile-card h1 {
-        font-size: 24px;
-        margin: 10px 0;
-        color: #333;
+        font-size: 32px;
+        font-weight: 700;
+        margin: 12px 0;
+        color: #ffffff;
+        letter-spacing: -0.03em;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
       }
       .profile-card p {
-        font-size: 16px;
-        color: #666;
-        line-height: 1.5;
+        font-size: 17px;
+        font-weight: 400;
+        color: #d1d4dc;
+        line-height: 1.7;
+        margin: 0 0 20px 0;
+      }
+      .social-links {
+        margin-top: 20px;
+      }
+      .social-links a {
+        display: inline-block;
+        margin: 0 10px;
+        color: #ffffff;
+        font-size: 20px;
+        text-decoration: none;
+        transition: color 0.3s ease, transform 0.3s ease;
+      }
+      .social-links a:hover {
+        color: #007aff;
+        transform: scale(1.2);
+      }
+      @media (max-width: 480px) {
+        .profile-card {
+          padding: 24px;
+        }
+        .profile-card img {
+          width: 120px;
+          height: 120px;
+        }
+        .profile-card h1 {
+          font-size: 26px;
+        }
+        .profile-card p {
+          font-size: 15px;
+        }
       }
     </style>
   </head>
   <body>
     <div class="profile-card">
-      <img src="images/vuvanthang.jpg" alt="Avatar của Vũ Văn Thăng" />
-      <h1>Vũ Văn Thăng</h1>
+      <img src="images/vuvanthang.jpg" alt="Vu Van Thang's Avatar" />
+      <h1>Vu Van Thang</h1>
       <p>
-        Chào mọi người! Mình là Vũ Văn Thăng, hiện đang quản lý một server chạy
-        tại địa chỉ IP 20.205.139.11, cổng 8080, sử dụng Nginx. Mình thích khám
-        phá công nghệ và tối ưu hóa hệ thống. Rất vui được kết nối với mọi
-        người!
+        Hello everyone! I'm Vu Van Thang, a 4th-year student at Hanoi University of Science and Technology. Passionate about technology, creativity, and always eager to learn new things.
       </p>
+      <div class="social-links">
+        <a href="#" aria-label="LinkedIn"><i class="fab fa-linkedin"></i></a>
+        <a href="#" aria-label="GitHub"><i class="fab fa-github"></i></a>
+        <a href="#" aria-label="Twitter"><i class="fab fa-twitter"></i></a>
+      </div>
     </div>
+    <!-- Font Awesome for icons -->
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
   </body>
 </html>
