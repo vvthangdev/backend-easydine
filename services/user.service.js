@@ -49,7 +49,7 @@ async function searchUsers(query) {
     }
 
     const users = await User.find(conditions);
-    console.log("Found users:", users); // Debug
+    // console.log("Found users:", users); // Debug
     return users;
   } catch (error) {
     console.error("Error searching users:", error.message, error.stack);
