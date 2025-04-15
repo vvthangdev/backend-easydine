@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vu Van Thang's Personal Page</title>
+    <title>Vu Van Thang | Aris</title>
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
@@ -45,10 +45,10 @@
         transform: scale(0.8);
       }
       .profile-card {
-        animation: morphIn 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        animation: morphIn 1.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
       }
       .social-card {
-        animation: morphIn 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s forwards;
+        animation: morphIn 1.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s forwards;
       }
       @keyframes morphIn {
         0% {
@@ -96,6 +96,14 @@
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         opacity: 0;
         animation: slideUp 0.5s ease-out 0.3s forwards;
+      }
+      .profile-card .nickname {
+        font-size: 20px;
+        font-weight: 400;
+        color: #d1d4dc;
+        margin: 8px 0;
+        opacity: 0;
+        animation: slideUp 0.5s ease-out 0.35s forwards;
       }
       .profile-card p {
         font-size: 17px;
@@ -183,6 +191,9 @@
         .profile-card h1 {
           font-size: 26px;
         }
+        .profile-card .nickname {
+          font-size: 18px;
+        }
         .profile-card p {
           font-size: 15px;
         }
@@ -205,6 +216,7 @@
       <div class="profile-card">
         <img src="images/vuvanthang.jpg" alt="Vu Van Thang's Avatar" />
         <h1>Vu Van Thang</h1>
+        <div class="nickname">Aris</div>
         <p>
           Hello everyone! I'm Vu Van Thang, a 4th-year student at Hanoi
           University of Science and Technology. Passionate about technology,
