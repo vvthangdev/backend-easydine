@@ -1,4 +1,4 @@
-name: Deploy be-easydine to Ubuntu Server
+name: Deploy be-EasyDine to Ubuntu Server
 on:
   push:
     branches:
@@ -14,9 +14,14 @@ jobs:
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: |
             cd /home/Aris/be-EasyDine
             git pull origin main
             npm install
-            pm2 restart be-easydine
+            if pm2 list | grep -q "be-EasyDine"; then
+              pm2 restart be-EasyDine
+            else
+              pm2 start npm --name "be-EasyDine" -- run start
+            fi
+            pm2 save
