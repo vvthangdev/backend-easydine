@@ -1,22 +1,25 @@
-name: Deploy be-EasyDine to Ubuntu Server v1
+name: Deploy be-EasyDine to Ubuntu Server
+
 on:
   push:
     branches:
       - main
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Deploy to server
+
+      - name: Deploy to Server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /home/Aris/be-EasyDine
+            cd /root/be-EasyDine
             git pull origin main
             npm install
             if pm2 list | grep -q "be-EasyDine"; then
@@ -25,3 +28,8 @@ jobs:
               pm2 start npm --name "be-EasyDine" -- run start
             fi
             pm2 save
+
+      - name: Check Server Health
+        run: |
+          sleep 10
+          curl -f https://vuvanthang.website || exit 1
