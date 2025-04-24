@@ -19,13 +19,13 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /root/be-EasyDine
+            cd /home/aris/be-EasyDine
             git pull origin main
             npm install
             if pm2 list | grep -q "be-EasyDine"; then
               pm2 restart be-EasyDine
             else
-              pm2 start npm --name "be-EasyDine" -- run start
+              pm2 start npm --name "be-EasyDine" -- run start --prefix /home/aris/be-EasyDine
             fi
             pm2 save
 
