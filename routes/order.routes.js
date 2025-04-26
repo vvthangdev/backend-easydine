@@ -1,23 +1,25 @@
 const express = require("express");
 const orderController = require("../controllers/order.controller.js");
-const authMiddware = require("../middlewares/auth.middleware.js");
+const authMiddleware = require("../middlewares/auth.middleware.js");
 
 const router = express.Router();
 
-router.use(authMiddware.authenticateToken); // Xác thực token cho tất cả route
+router.use(authMiddleware.authenticateToken);
 
-router.get("/", orderController.getAllOrders); // Không cần adminRoleAuth
-router.get("/all-order-info", orderController.getAllOrdersInfo); // Không cần adminRoleAuth
+router.get("/", orderController.getAllOrders);
+router.get("/all-order-info", orderController.getAllOrdersInfo);
 router.patch("/update-order", orderController.updateOrder);
 router.get("/my-orders", orderController.getUserOrders);
-router.delete("/delete-order/:id", authMiddware.adminRoleAuth, orderController.deleteOrder); // Giữ adminRoleAuth
-router.get("/order-info", orderController.getOrderInfo); // Không cần adminRoleAuth
+router.delete("/delete-order/:id", authMiddleware.adminRoleAuth, orderController.deleteOrder);
+router.get("/order-info", orderController.getOrderInfo);
 router.post("/create-order", orderController.createOrder);
-
-// Route mới: Lấy danh sách bàn khả dụng
 router.get("/available-tables", orderController.getAvailableTables);
+router.get("/search-by-customer", authMiddleware.adminRoleAuth, orderController.searchOrdersByCustomerId);
 
-// Route mới cho ADMIN: Tìm kiếm đơn hàng theo customer_id
-router.get("/search-by-customer", orderController.searchOrdersByCustomerId);
+// Route mới
+router.post("/confirm-order", authMiddleware.adminRoleAuth, orderController.confirmOrder);
+
+
+router.post("/split-order", authMiddleware.adminRoleAuth, orderController.splitOrder);
 
 module.exports = router;

@@ -1,5 +1,8 @@
 const TableInfo = require("../models/table_info.model");
 const tableService = require("../services/table.service");
+const ReservedTable = require("../models/reservation_table.model")
+const mongoose = require('mongoose'); 
+const OrderDetail = require("../models/order_detail.model")
 
 const getAllTables = async (req, res) => {
   try {
@@ -59,9 +62,112 @@ const deleteTable = async (req, res) => {
   }
 };
 
+// API lấy trạng thái toàn bộ bàn
+const getAllTablesStatus = async (req, res) => {
+  try {
+    const currentTime = new Date();
+
+    const allTables = await TableInfo.find().lean();
+
+    const activeReservations = await ReservedTable.find({
+      start_time: { $lte: currentTime },
+      end_time: { $gte: currentTime }
+    }).populate({
+      path: 'reservation_id',
+      match: { status: { $in: ['pending', 'confirmed'] } }
+    }).lean();
+
+    const validReservations = activeReservations.filter(res => res.reservation_id);
+
+    const tablesWithStatus = allTables.map(table => {
+      const reservation = validReservations.find(res => res.table_id === table.table_number);
+      let status = 'Available';
+
+      if (reservation) {
+        status = reservation.reservation_id.status === 'pending' ? 'Reserved' : 'Occupied';
+      }
+
+      return {
+        table_number: table.table_number,
+        capacity: table.capacity,
+        status,
+        start_time: reservation ? reservation.start_time : null,
+        end_time: reservation ? reservation.end_time : null,
+        reservation_id: reservation ? reservation.reservation_id._id : null // Đảm bảo trả reservation_id
+      };
+    });
+
+    res.json({
+      status: "SUCCESS",
+      message: "Lấy trạng thái bàn thành công",
+      tables: tablesWithStatus
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy trạng thái bàn:", error);
+    res.status(500).json({ error: "Lỗi khi lấy trạng thái bàn" });
+  }
+};
+
+
+// API mới: Trả bàn sớm
+const releaseTable = async (req, res) => {
+  try {
+    const { reservation_id, table_id } = req.body;
+
+    if (!reservation_id || !mongoose.Types.ObjectId.isValid(reservation_id)) {
+      return res.status(400).json({ error: "Valid reservation_id is required" });
+    }
+    if (!table_id || isNaN(table_id)) {
+      return res.status(400).json({ error: "Valid table_id is required" });
+    }
+
+    // Tìm đơn hàng
+    const order = await OrderDetail.findById(reservation_id);
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Tìm bản ghi ReservationTable
+    const reservationTable = await ReservedTable.findOne({
+      reservation_id,
+      table_id
+    });
+    if (!reservationTable) {
+      return res.status(404).json({ error: "Table reservation not found" });
+    }
+
+    // Cập nhật end_time thành thời gian hiện tại
+    reservationTable.end_time = new Date();
+    await reservationTable.save();
+
+    // Lấy thông tin bàn để trả về response
+    const tableInfo = await TableInfo.findOne({ table_number: table_id }).lean();
+    if (!tableInfo) {
+      return res.status(404).json({ error: "Table not found" });
+    }
+
+    res.json({
+      status: "SUCCESS",
+      message: "Bàn đã được trả thành công",
+      table: {
+        table_number: tableInfo.table_number,
+        capacity: tableInfo.capacity,
+        status: "Available",
+        start_time: reservationTable.start_time,
+        end_time: reservationTable.end_time
+      }
+    });
+  } catch (error) {
+    console.error("Lỗi khi trả bàn:", error);
+    res.status(500).json({ error: "Lỗi khi trả bàn" });
+  }
+};
+
 module.exports = {
   getAllTables,
   createTable,
   updateTable,
   deleteTable,
+  getAllTablesStatus,
+  releaseTable,
 };

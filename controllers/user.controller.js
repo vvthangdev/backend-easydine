@@ -2,6 +2,7 @@ const User = require("../models/user.model.js");
 require("dotenv").config();
 const userService = require("../services/user.service");
 const authUtil = require("../utils/auth.util");
+const mongoose = require('mongoose');
 const { Auth } = require("two-step-auth");
 
 const getAllUsers = async (req, res) => {
@@ -272,6 +273,38 @@ const searchUsers = async (req, res) => {
   }
 };
 
+const getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Valid user ID is required" });
+    }
+
+    const user = await User.findById(id, { refresh_token: 0, password: 0 });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({
+      status: "SUCCESS",
+      message: "User fetched successfully",
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        address: user.address,
+        avatar: user.avatar,
+        phone: user.phone
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching user by ID:", error);
+    res.status(500).json({ error: "Error fetching user" });
+  }
+};
+
 function removeVietnameseAccents(str) {
   return str
     .normalize("NFD")
@@ -290,5 +323,6 @@ module.exports = {
   updateUser,
   deleteUser,
   sendOTP,
-  searchUsers, // Thêm hàm tìm kiếm
+  searchUsers,
+  getUserById, // Thêm hàm tìm kiếm
 };

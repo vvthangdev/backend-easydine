@@ -13,5 +13,8 @@ router.get("/", tableController.getAllTables);
 router.post("/create-table", tableController.createTable);
 router.patch("/update-table", tableController.updateTable);
 router.delete("/delete-table", tableController.deleteTable);
+router.get("/tables-status", tableController.getAllTablesStatus);
+
+router.post("/release-table", tableController.releaseTable); // Route mới
 
 module.exports = router;

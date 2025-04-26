@@ -1,6 +1,7 @@
 const OrderDetail = require("../models/order_detail.model");
 const orderService = require("../services/order.service");
 const ReservedTable = require("../models/reservation_table.model");
+const TableInfo = require("../models/table_info.model")
 const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
 const emailService = require("../services/send-email.service");
@@ -220,6 +221,7 @@ const getOrderInfo = async (req, res) => {
       order: {
         id: order._id,
         customer_id: order.customer_id,
+        staff_id: order.staff_id,
         time: order.time,
         type: order.type,
         status: order.status
@@ -343,6 +345,214 @@ const getAvailableTables = async (req, res) => {
   }
 };
 
+// API xác nhận đơn hàng
+const confirmOrder = async (req, res) => {
+  try {
+    const { order_id } = req.body;
+    const user = req.user; // Nhân viên từ middleware
+
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({ error: "Valid order_id is required" });
+    }
+
+    // Tìm đơn hàng
+    const order = await OrderDetail.findById(order_id);
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Kiểm tra trạng thái
+    if (order.status !== 'pending') {
+      return res.status(400).json({ error: "Chỉ có thể xác nhận đơn hàng ở trạng thái pending" });
+    }
+
+    // Cập nhật trạng thái và gán staff_id
+    order.status = 'confirmed';
+    order.staff_id = user._id; // Gán nhân viên xác nhận
+    await order.save();
+
+    res.json({
+      status: "SUCCESS",
+      message: "Xác nhận đơn hàng thành công",
+      order: {
+        _id: order._id,
+        customer_id: order.customer_id,
+        staff_id: order.staff_id,
+        time: order.time,
+        type: order.type,
+        status: order.status,
+        star: order.star,
+        comment: order.comment
+      }
+    });
+  } catch (error) {
+    console.error("Lỗi khi xác nhận đơn hàng:", error);
+    res.status(500).json({ error: "Lỗi khi xác nhận đơn hàng" });
+  }
+};
+
+// API tách hóa đơn
+const splitOrder = async (req, res) => {
+  try {
+    const { order_id, new_items } = req.body;
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({ error: "Valid order_id is required" });
+    }
+    if (!new_items || !Array.isArray(new_items) || new_items.length === 0) {
+      return res.status(400).json({ error: "new_items must be a non-empty array" });
+    }
+
+    const originalOrder = await OrderDetail.findById(order_id);
+    if (!originalOrder) {
+      return res.status(404).json({ error: "Original order not found" });
+    }
+
+    const originalItemOrders = await ItemOrder.find({ order_id }).lean();
+    if (!originalItemOrders.length) {
+      return res.status(400).json({ error: "No items found in original order" });
+    }
+
+    const originalQuantities = {};
+    originalItemOrders.forEach(item => {
+      originalQuantities[item.item_id.toString()] = {
+        quantity: item.quantity,
+        size: item.size,
+        note: item.note
+      };
+    });
+
+    const newQuantities = {};
+    for (const item of new_items) {
+      if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
+        return res.status(400).json({ error: "Invalid item ID in new_items" });
+      }
+      if (!item.quantity || item.quantity < 1) {
+        return res.status(400).json({ error: "Quantity must be a positive number" });
+      }
+      const itemExists = await Item.findById(item.id);
+      if (!itemExists) {
+        return res.status(400).json({ error: `Item with ID ${item.id} not found` });
+      }
+      if (item.size) {
+        const validSize = itemExists.sizes.find(s => s.name === item.size);
+        if (!validSize) {
+          return res.status(400).json({ error: `Invalid size ${item.size} for item ${itemExists.name}` });
+        }
+      }
+      const itemKey = `${item.id}-${item.size || 'default'}`;
+      newQuantities[itemKey] = (newQuantities[itemKey] || 0) + item.quantity;
+    }
+
+    for (const itemKey in newQuantities) {
+      const [itemId, size] = itemKey.split('-');
+      const original = originalQuantities[itemId];
+      if (!original || (size !== 'default' && original.size !== size) || newQuantities[itemKey] > original.quantity) {
+        return res.status(400).json({ error: "New items exceed original quantities or mismatch size" });
+      }
+    }
+
+    const newOrder = await orderService.createOrder({
+      customer_id: originalOrder.customer_id,
+      time: originalOrder.time,
+      type: originalOrder.type,
+      status: originalOrder.status
+    });
+
+    const originalReservations = await ReservedTable.find({ reservation_id: order_id }).lean();
+    if (originalOrder.type === 'reservation' && originalReservations.length > 0) {
+      const newReservations = originalReservations.map(res => ({
+        reservation_id: newOrder._id,
+        table_id: res.table_id,
+        start_time: res.start_time,
+        end_time: res.end_time,
+        people_assigned: res.people_assigned
+      }));
+      await orderService.createReservations(newReservations);
+    }
+
+    const newItemOrders = new_items.map(item => ({
+      item_id: new mongoose.Types.ObjectId(item.id),
+      quantity: item.quantity,
+      order_id: newOrder._id,
+      size: item.size || null,
+      note: item.note || ""
+    }));
+    await orderService.createItemOrders(newItemOrders);
+
+    const remainingItems = {};
+    originalItemOrders.forEach(item => {
+      const itemKey = `${item.item_id}-${item.size || 'default'}`;
+      const newQty = newQuantities[itemKey] || 0;
+      if (item.quantity > newQty) {
+        remainingItems[itemKey] = {
+          item_id: item.item_id,
+          quantity: item.quantity - newQty,
+          size: item.size,
+          note: item.note
+        };
+      }
+    });
+
+    await ItemOrder.deleteMany({ order_id });
+    const updatedItemOrders = Object.values(remainingItems).map(item => ({
+      item_id: item.item_id,
+      quantity: item.quantity,
+      order_id,
+      size: item.size,
+      note: item.note
+    }));
+    await orderService.createItemOrders(updatedItemOrders);
+
+    const user = await getUserByUserId(originalOrder.customer_id);
+    await emailService.sendOrderConfirmationEmail(user.email, user.name, originalOrder);
+    await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
+
+    // Lấy trạng thái bàn cho response
+    const reservedTables = await ReservedTable.find({ reservation_id: order_id }).lean();
+    const tableIds = reservedTables.map(rt => rt.table_id);
+    const tablesInfo = await TableInfo.find({ table_number: { $in: tableIds } }).lean();
+
+    const tablesWithStatus = tablesInfo.map(table => {
+      const reservedTable = reservedTables.find(rt => rt.table_id === table.table_number);
+      return {
+        table_number: table.table_number,
+        capacity: table.capacity,
+        status: originalOrder.status === 'pending' ? 'Reserved' : 'Occupied',
+        start_time: reservedTable ? reservedTable.start_time : null,
+        end_time: reservedTable ? reservedTable.end_time : null
+      };
+    });
+
+    res.json({
+      status: "SUCCESS",
+      message: "Order split successfully",
+      originalOrder: {
+        id: originalOrder._id,
+        items: updatedItemOrders.map(item => ({
+          item_id: item.item_id,
+          quantity: item.quantity,
+          size: item.size,
+          note: item.note
+        })),
+        tables: tablesWithStatus
+      },
+      newOrder: {
+        id: newOrder._id,
+        items: newItemOrders.map(item => ({
+          item_id: item.item_id,
+          quantity: item.quantity,
+          size: item.size,
+          note: item.note
+        })),
+        tables: tablesWithStatus // Đơn mới có cùng bàn
+      }
+    });
+  } catch (error) {
+    console.error("Error splitting order:", error);
+    res.status(500).json({ error: "Error splitting order" });
+  }
+};
+
 module.exports = {
   getAllOrders,
   getAllOrdersInfo,
@@ -353,4 +563,6 @@ module.exports = {
   searchOrdersByCustomerId,
   deleteOrder,
   getAvailableTables,
+  confirmOrder,
+  splitOrder
 };
