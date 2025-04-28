@@ -1,4 +1,4 @@
-name: Deploy be-EasyDine to Ubuntu Server
+name: Deploy be-EasyDine Backend to Ubuntu Server
 
 on:
   push:
@@ -19,15 +19,23 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /home/aris/be-EasyDine
-            git pull origin main
-            npm install
-            if pm2 list | grep -q "be-EasyDine"; then
-              pm2 restart be-EasyDine
-            else
-              pm2 start npm --name "be-EasyDine" -- run start --prefix /home/aris/be-EasyDine
+            # Đảm bảo Docker và Docker Compose được cài đặt
+            if ! command -v docker &> /dev/null; then
+              sudo apt update
+              sudo apt install -y docker.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker ${{ secrets.SERVER_USER }}
             fi
-            pm2 save
+            if ! command -v docker-compose &> /dev/null; then
+              sudo apt install -y docker-compose
+            fi
+
+            # Triển khai backend
+            cd /home/aris/backend-easydine
+            git pull origin main
+            docker-compose down
+            docker-compose up -d --build
 
       - name: Check Server Health
         run: |
