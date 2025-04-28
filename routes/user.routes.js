@@ -8,7 +8,7 @@ const router = express.Router();
 
 router.get("/all-users", userController.getAllUsers);
 router.get("/user-info", authMiddleware.authenticateToken, userController.userInfo);
-router.get("/:id", authMiddleware.authenticateToken, userController.getUserById); // Thêm route mới
+
 router.post("/signup", userUtil.validateSignUpSignUp, userMiddleware.checkUserExistsSignUp, userController.signUp);
 router.post("/login", userMiddleware.checkUserExistLogin, userController.login);
 router.post("/refresh-token", userController.refreshToken);
@@ -18,5 +18,14 @@ router.delete("/delete", authMiddleware.authenticateToken, userController.delete
 router.post("/sendOTP", userController.sendOTP);
 router.get("/all", authMiddleware.authenticateToken, userController.getAllUsers);
 router.get("/search", authMiddleware.authenticateToken, userController.searchUsers);
+
+router.get("/:id", authMiddleware.authenticateToken, userController.getUserById);
+
+router.patch(
+    "/admin/update/:id",
+    authMiddleware.authenticateToken,
+    authMiddleware.adminRoleAuth,
+    userController.updateUserByAdmin
+  );
 
 module.exports = router;

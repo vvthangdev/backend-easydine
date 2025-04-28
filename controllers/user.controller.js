@@ -305,13 +305,67 @@ const getUserById = async (req, res) => {
   }
 };
 
-function removeVietnameseAccents(str) {
-  return str
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D");
-}
+const updateUserByAdmin = async (req, res) => {
+  try {
+    const { id } = req.params; // Lấy ID người dùng từ params
+    const { email, password, username, name, phone, role, address, avatar } = req.body;
+
+    // Kiểm tra ID hợp lệ
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Valid user ID is required" });
+    }
+
+    // Kiểm tra xem user có tồn tại
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Tạo object chứa dữ liệu cần update
+    const updateData = {};
+    if (email) updateData.email = email;
+    if (name) updateData.name = name;
+    if (phone) updateData.phone = phone;
+    if (address) updateData.address = address;
+    if (avatar) updateData.avatar = avatar;
+    if (username) updateData.username = username;
+    if (role && ["ADMIN", "STAFF", "CUSTOMER"].includes(role)) {
+      updateData.role = role;
+    }
+    if (password) {
+      const saltRounds = 10;
+      updateData.password = await bcrypt.hash(password, saltRounds);
+    }
+
+    // Kiểm tra email hoặc username mới có trùng với user khác không
+    if (email || username) {
+      const existingUser = await User.findOne({
+        $or: [{ email: updateData.email }, { username: updateData.username }],
+        _id: { $ne: id }
+      });
+      if (existingUser) {
+        return res.status(400).json({ error: "Email or username already exists" });
+      }
+    }
+
+    // Cập nhật user
+    const updatedUser = await User.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, select: "-password -refresh_token" }
+    );
+
+    res.json({
+      status: "SUCCESS",
+      message: "User updated successfully by admin",
+      user: updatedUser
+    });
+  } catch (error) {
+    console.error("Error updating user by admin:", error);
+    res.status(500).json({ error: "Error updating user" });
+  }
+};
+
 
 module.exports = {
   getAllUsers,
@@ -324,5 +378,6 @@ module.exports = {
   deleteUser,
   sendOTP,
   searchUsers,
-  getUserById, // Thêm hàm tìm kiếm
+  getUserById,
+  updateUserByAdmin,
 };

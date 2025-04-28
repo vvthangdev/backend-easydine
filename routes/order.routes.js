@@ -19,7 +19,6 @@ router.get("/search-by-customer", authMiddleware.adminRoleAuth, orderController.
 // Route mới
 router.post("/confirm-order", authMiddleware.adminRoleAuth, orderController.confirmOrder);
 
-
 router.post("/split-order", authMiddleware.adminRoleAuth, orderController.splitOrder);
 
 module.exports = router;
