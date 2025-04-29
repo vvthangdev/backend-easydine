@@ -7,9 +7,7 @@ services:
       dockerfile: Dockerfile
       cache_from:
         - backend-easydine_backend:latest
-      args:
-        - BUILD_TAG=${BUILD_TAG:-latest}
-    image: backend-easydine_backend:${BUILD_TAG:-latest}
+    image: backend-easydine_backend:latest
     container_name: backend
     ports:
       - "8080:8080"
