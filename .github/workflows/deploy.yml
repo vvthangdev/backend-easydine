@@ -41,23 +41,6 @@ jobs:
               fi
             fi
 
-            # Tạo thư mục secrets
-            mkdir -p /home/aris/backend-easydine/secrets
-
-            # Tạo các file secrets (tên in hoa)
-            echo "${{ secrets.MONGO_URI }}" > /home/aris/backend-easydine/secrets/MONGO_URI
-            echo "${{ secrets.ACCESS_TOKEN_SECRET }}" > /home/aris/backend-easydine/secrets/ACCESS_TOKEN_SECRET
-            echo "${{ secrets.ACCESS_TOKEN_LIFE }}" > /home/aris/backend-easydine/secrets/ACCESS_TOKEN_LIFE
-            echo "${{ secrets.REFRESH_TOKEN_SECRET }}" > /home/aris/backend-easydine/secrets/REFRESH_TOKEN_SECRET
-            echo "${{ secrets.REFRESH_TOKEN_LIFE }}" > /home/aris/backend-easydine/secrets/REFRESH_TOKEN_LIFE
-            echo "${{ secrets.REFRESH_TOKEN_SIZE }}" > /home/aris/backend-easydine/secrets/REFRESH_TOKEN_SIZE
-            echo "${{ secrets.END_TIME_OFFSET_MINUTES }}" > /home/aris/backend-easydine/secrets/END_TIME_OFFSET_MINUTES
-            echo "${{ secrets.EMAIL_USER }}" > /home/aris/backend-easydine/secrets/EMAIL_USER
-            echo "${{ secrets.EMAIL_PASS }}" > /home/aris/backend-easydine/secrets/EMAIL_PASS
-
-            # Thiết lập quyền cho các file secrets
-            chmod 600 /home/aris/backend-easydine/secrets/*
-
             # Triển khai backend
             cd /home/aris/backend-easydine
             git pull origin main
@@ -66,5 +49,5 @@ jobs:
 
       - name: Check Server Health
         run: |
-          sleep 10
+          sleep 30
           curl -f https://vuvanthang.website || exit 1

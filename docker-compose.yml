@@ -13,38 +13,26 @@ services:
       - NODE_ENV=production
     env_file:
       - .env
-    secrets:
-      - MONGO_URI
-      - ACCESS_TOKEN_SECRET
-      - ACCESS_TOKEN_LIFE
-      - REFRESH_TOKEN_SECRET
-      - REFRESH_TOKEN_LIFE
-      - REFRESH_TOKEN_SIZE
-      - END_TIME_OFFSET_MINUTES
-      - EMAIL_USER
-      - EMAIL_PASS
+    networks:
+      - mongo_app-network
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=aris
+      - MONGO_INITDB_ROOT_PASSWORD=thang.vv215643
+    volumes:
+      - mongo_data:/data/db
     networks:
       - mongo_app-network
 
-secrets:
-  MONGO_URI:
-    file: ./secrets/MONGO_URI
-  ACCESS_TOKEN_SECRET:
-    file: ./secrets/ACCESS_TOKEN_SECRET
-  ACCESS_TOKEN_LIFE:
-    file: ./secrets/ACCESS_TOKEN_LIFE
-  REFRESH_TOKEN_SECRET:
-    file: ./secrets/REFRESH_TOKEN_SECRET
-  REFRESH_TOKEN_LIFE:
-    file: ./secrets/REFRESH_TOKEN_LIFE
-  REFRESH_TOKEN_SIZE:
-    file: ./secrets/REFRESH_TOKEN_SIZE
-  END_TIME_OFFSET_MINUTES:
-    file: ./secrets/END_TIME_OFFSET_MINUTES
-  EMAIL_USER:
-    file: ./secrets/EMAIL_USER
-  EMAIL_PASS:
-    file: ./secrets/EMAIL_PASS
+volumes:
+  mongo_data:
 
 networks:
   mongo_app-network:
