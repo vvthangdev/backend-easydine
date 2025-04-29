@@ -15,24 +15,6 @@ services:
       - .env
     networks:
       - mongo_app-network
-    depends_on:
-      - mongodb
-
-  mongodb:
-    image: mongo:latest
-    container_name: mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=aris
-      - MONGO_INITDB_ROOT_PASSWORD=thang.vv215643
-    volumes:
-      - mongo_data:/data/db
-    networks:
-      - mongo_app-network
-
-volumes:
-  mongo_data:
 
 networks:
   mongo_app-network:
