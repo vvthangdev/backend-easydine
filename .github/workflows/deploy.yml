@@ -22,7 +22,7 @@ jobs:
             # Đảm bảo Docker và Docker Compose được cài đặt
             if ! command -v docker &> /dev/null; then
               sudo apt update
-              sudo apt install -y docker.io docker-buildx-plugin
+              sudo apt install -y docker.io
               sudo systemctl start docker
               sudo systemctl enable docker
               sudo usermod -aG docker ${{ secrets.SERVER_USER }}
@@ -30,9 +30,6 @@ jobs:
             if ! command -v docker-compose &> /dev/null; then
               sudo apt install -y docker-compose
             fi
-
-            # Kích hoạt BuildKit để tránh thông báo deprecated
-            export DOCKER_BUILDKIT=1
 
             # Load image node:18 nếu cần
             if ! docker image inspect node:18 >/dev/null 2>&1; then
