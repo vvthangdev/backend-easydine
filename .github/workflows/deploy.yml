@@ -32,7 +32,7 @@ jobs:
             fi
 
             # Kích hoạt BuildKit để tránh thông báo deprecated
-            export DOCKER_BUILDKIT=1
+            export DOCKER_BUILDKIT=1
 
             # Load image node:18 nếu cần
             if ! docker image inspect node:18 >/dev/null 2>&1; then
