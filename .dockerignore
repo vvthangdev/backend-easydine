@@ -1,23 +1,39 @@
+# Node.js
 node_modules/
 npm-debug.log
 *.log
 *.log.*
+
+# Bí mật và cấu hình
 secrets/
+# .env
+
+# Git
 .git/
 .gitignore
+
+# GitHub Actions
 .github/
+
+# Tài liệu và metadata
 *.md
 LICENSE
+
+# File tạm
 *.bak
 *.swp
 *.tmp
 temp/
 tmp/
+
+# Test và build
 tests/
 __tests__/
 coverage/
 dist/
 build/
+
+# IDE và editor
 .vscode/
 .idea/
 *.DS_Store
