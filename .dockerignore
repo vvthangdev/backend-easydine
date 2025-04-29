@@ -1,0 +1,12 @@
+# Loại bỏ các file/thư mục không cần thiết trong image
+node_modules/
+npm-debug.log
+.env
+secrets/
+.git/
+.gitignore
+.github/
+Dockerfile
+docker-compose.yml
+*.md
+*.log

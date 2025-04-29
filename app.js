@@ -6,15 +6,50 @@ const { Server } = require("socket.io");
 const { createServer } = require("node:http");
 const server = createServer(app);
 const io = new Server(server);
-const multer = require("multer"); // Đã có sẵn
+const multer = require("multer");
+const fs = require("fs");
 
-// Cấu hình multer để xử lý form-data (không lưu file vì không có file upload)
-const upload = multer(); // Không cần storage vì không có file
-app.use(express.urlencoded({ extended: true })); // Đảm bảo xử lý URL-encoded data
-app.use(express.json()); // Xử lý JSON nếu cần
+// Cấu hình multer để xử lý form-data (không lưu file)
+const upload = multer();
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
+// Hàm đọc secret từ file
+const readSecret = (secretName) => {
+  try {
+    const secretPath = `/run/secrets/${secretName}`;
+    if (fs.existsSync(secretPath)) {
+      return fs.readFileSync(secretPath, "utf8").trim();
+    }
+  } catch (err) {
+    console.error(`Error reading secret ${secretName}:`, err);
+  }
+  return null;
+};
+
+// Tải biến môi trường từ .env (cho môi trường phát triển)
 require("dotenv").config();
-const os = require("os");
+
+// Danh sách các secrets (in hoa, đồng bộ với .env)
+const secrets = [
+  "MONGO_URI",
+  "ACCESS_TOKEN_SECRET",
+  "ACCESS_TOKEN_LIFE",
+  "REFRESH_TOKEN_SECRET",
+  "REFRESH_TOKEN_LIFE",
+  "REFRESH_TOKEN_SIZE",
+  "END_TIME_OFFSET_MINUTES",
+  "EMAIL_USER",
+  "EMAIL_PASS",
+];
+
+// Ghi đè biến môi trường bằng giá trị từ secrets nếu tồn tại
+secrets.forEach((secret) => {
+  const secretValue = readSecret(secret);
+  if (secretValue) {
+    process.env[secret] = secretValue;
+  }
+});
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -37,8 +72,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Thêm middleware multer cho các route cần xử lý form-data
-// Áp dụng cho tất cả các route trong itemRouter
-app.use("/item", upload.none(), itemRouter); // upload.none() để chỉ xử lý text fields
+app.use("/item", upload.none(), itemRouter);
 
 app.use("/users", userRoutes);
 app.use("/tables", tableRouter);
@@ -49,15 +83,6 @@ app.use("/vouchers", voucherRouter);
 
 const PORT = process.env.PORT || 8080;
 
-// connectDB()
-//   .then(() => {
-//     server.listen(PORT, () => {
-//       console.log(`Server is running on http://localhost:${PORT}/`);
-//     });
-//   })
-//   .catch((err) => {
-//     console.error("Unable to connect to the database:", err);
-//   });
 connectDB()
   .then(() => {
     server.listen(PORT, "0.0.0.0", () => {

@@ -13,8 +13,38 @@ services:
       - NODE_ENV=production
     env_file:
       - .env
+    secrets:
+      - MONGO_URI
+      - ACCESS_TOKEN_SECRET
+      - ACCESS_TOKEN_LIFE
+      - REFRESH_TOKEN_SECRET
+      - REFRESH_TOKEN_LIFE
+      - REFRESH_TOKEN_SIZE
+      - END_TIME_OFFSET_MINUTES
+      - EMAIL_USER
+      - EMAIL_PASS
     networks:
       - mongo_app-network
+
+secrets:
+  MONGO_URI:
+    file: ./secrets/MONGO_URI
+  ACCESS_TOKEN_SECRET:
+    file: ./secrets/ACCESS_TOKEN_SECRET
+  ACCESS_TOKEN_LIFE:
+    file: ./secrets/ACCESS_TOKEN_LIFE
+  REFRESH_TOKEN_SECRET:
+    file: ./secrets/REFRESH_TOKEN_SECRET
+  REFRESH_TOKEN_LIFE:
+    file: ./secrets/REFRESH_TOKEN_LIFE
+  REFRESH_TOKEN_SIZE:
+    file: ./secrets/REFRESH_TOKEN_SIZE
+  END_TIME_OFFSET_MINUTES:
+    file: ./secrets/END_TIME_OFFSET_MINUTES
+  EMAIL_USER:
+    file: ./secrets/EMAIL_USER
+  EMAIL_PASS:
+    file: ./secrets/EMAIL_PASS
 
 networks:
   mongo_app-network:
