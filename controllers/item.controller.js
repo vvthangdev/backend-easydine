@@ -6,15 +6,15 @@ const itemService = require("../services/item.service");
 const createCategory = async (req, res) => {
   try {
     const { name, description, image } = req.body;
-    if (!name) return res.status(400).json({ error: "Category name is required" });
+    if (!name) return res.status(400).json({ error: "Tên danh mục là bắt buộc" });
     const existingCategory = await Category.findOne({ name });
-    if (existingCategory) return res.status(400).json({ error: "Category already exists" });
+    if (existingCategory) return res.status(400).json({ error: "Danh mục đã tồn tại" });
     const newCategory = new Category({ name, description, image });
     await newCategory.save();
     res.status(201).json(newCategory);
   } catch (error) {
-    console.error("Error creating category:", error);
-    res.status(500).json({ error: "Error creating category" });
+    console.error("Lỗi khi tạo danh mục:", error);
+    res.status(500).json({ error: "Lỗi khi tạo danh mục" });
   }
 };
 
@@ -23,22 +23,22 @@ const getAllCategories = async (req, res) => {
     const categories = await Category.find();
     res.json(categories);
   } catch (error) {
-    res.status(500).json({ error: "Error fetching categories" });
+    res.status(500).json({ error: "Lỗi khi lấy danh mục" });
   }
 };
 
 const deleteCategory = async (req, res) => {
   try {
     const { categoryId } = req.body;
-    if (!categoryId) return res.status(400).json({ error: "Category ID is required" });
+    if (!categoryId) return res.status(400).json({ error: "ID danh mục là bắt buộc" });
     const category = await Category.findById(categoryId);
-    if (!category) return res.status(404).json({ error: "Category not found" });
+    if (!category) return res.status(404).json({ error: "Không tìm thấy danh mục" });
     await Item.updateMany({ categories: categoryId }, { $pull: { categories: categoryId } });
     await Category.findByIdAndDelete(categoryId);
-    res.json({ message: "Category deleted and removed from items successfully" });
+    res.json({ message: "Xóa danh mục và cập nhật món ăn thành công" });
   } catch (error) {
-    console.error("Error deleting category:", error);
-    res.status(500).json({ error: "Error deleting category" });
+    console.error("Lỗi khi xóa danh mục:", error);
+    res.status(500).json({ error: "Lỗi khi xóa danh mục" });
   }
 };
 
@@ -47,7 +47,7 @@ const getAllItems = async (req, res) => {
     const items = await Item.find().populate("categories");
     res.json(items);
   } catch (error) {
-    res.status(500).json({ error: "Error fetching items" });
+    res.status(500).json({ error: "Lỗi khi lấy món ăn" });
   }
 };
 
@@ -56,96 +56,110 @@ const getItemBanner = async (req, res) => {
     const items = await ItemBanner.find();
     res.json(items);
   } catch (error) {
-    res.status(500).json({ error: "Error fetching item banners" });
+    res.status(500).json({ error: "Lỗi khi lấy banner món ăn" });
   }
 };
 
 const createItem = async (req, res) => {
   try {
-    const { name, image, price, categories, sizes } = req.body;
-    if (!name || !image || !price || !categories || !Array.isArray(categories)) {
-      return res.status(400).json({
-        error: "Name, image, price, and categories (array) are required",
-      });
+    const { name, price, description, image, categories, sizes } = req.body;
+    if (!name || !price) {
+      return res.status(400).json({ error: "Tên và giá là bắt buộc" });
     }
-    const validCategories = await Category.find({ _id: { $in: categories } });
-    if (validCategories.length !== categories.length) {
-      return res.status(400).json({ error: "One or more category IDs are invalid" });
+    if (categories && !Array.isArray(categories)) {
+      return res.status(400).json({ error: "Danh mục phải là mảng" });
+    }
+    if (categories && categories.length > 0) {
+      const validCategories = await Category.find({ _id: { $in: categories } });
+      if (validCategories.length !== categories.length) {
+        return res.status(400).json({ error: "Một hoặc nhiều ID danh mục không hợp lệ" });
+      }
+    }
+    if (sizes && !Array.isArray(sizes)) {
+      return res.status(400).json({ error: "Kích cỡ phải là mảng" });
     }
     if (sizes) {
-      if (!Array.isArray(sizes)) return res.status(400).json({ error: "Sizes must be an array" });
       for (const size of sizes) {
         if (!size.name || !size.price || size.price < 0) {
-          return res.status(400).json({ error: "Each size must have a valid name and price" });
+          return res.status(400).json({ error: "Mỗi kích cỡ phải có tên và giá hợp lệ" });
         }
       }
     }
     const newItem = await itemService.createItem({
       name,
-      image,
       price,
-      categories,
+      description,
+      image,
+      categories: categories || [],
       sizes: sizes || [],
     });
     res.status(201).json(newItem);
   } catch (error) {
-    console.error("Error creating item:", error);
-    res.status(500).json({ error: "Error creating item" });
+    console.error("Lỗi khi tạo món ăn:", error);
+    res.status(500).json({ error: "Lỗi khi tạo món ăn" });
   }
 };
 
 const createItemBanner = async (req, res) => {
   try {
     const { image, title } = req.body;
-    if (!image || !title) return res.status(400).json({ error: "Image and title are required." });
+    if (!image || !title) return res.status(400).json({ error: "Hình ảnh và tiêu đề là bắt buộc" });
     const newItemBanner = new ItemBanner({ image, title });
     await newItemBanner.save();
     res.status(201).json(newItemBanner);
   } catch (error) {
-    console.error("Error creating item banner:", error);
-    res.status(500).json({ error: "Error creating item banner" });
+    console.error("Lỗi khi tạo banner món ăn:", error);
+    res.status(500).json({ error: "Lỗi khi tạo banner món ăn" });
   }
 };
 
 const updateItem = async (req, res) => {
   try {
-    const { id, name, image, price, categories, sizes } = req.body;
-    if (!id) return res.status(400).send("Item ID required.");
+    const { id, name, price, description, image, categories, sizes } = req.body;
+    if (!id) return res.status(400).send("ID món ăn là bắt buộc");
 
     const updateData = {};
     if (name) updateData.name = name;
-    if (image) updateData.image = image;
-    if (price) updateData.price = price;
-    if (categories) {
-      const validCategories = await Category.find({ _id: { $in: categories } });
-      if (validCategories.length !== categories.length) {
-        return res.status(400).json({ error: "One or more category IDs are invalid" });
+    if (price !== undefined) updateData.price = price;
+    if (description !== undefined) updateData.description = description;
+    if (image !== undefined) updateData.image = image;
+    if (categories !== undefined) {
+      if (categories && !Array.isArray(categories)) {
+        return res.status(400).json({ error: "Danh mục phải là mảng" });
+      }
+      if (categories.length > 0) {
+        const validCategories = await Category.find({ _id: { $in: categories } });
+        if (validCategories.length !== categories.length) {
+          return res.status(400).json({ error: "Một hoặc nhiều ID danh mục không hợp lệ" });
+        }
       }
       updateData.categories = categories;
     }
     if (sizes !== undefined) {
-      if (!Array.isArray(sizes)) return res.status(400).json({ error: "Sizes must be an array" });
-      for (const size of sizes) {
-        if (!size.name || !size.price || size.price < 0) {
-          return res.status(400).json({ error: "Each size must have a valid name and price" });
+      if (sizes && !Array.isArray(sizes)) return res.status(400).json({ error: "Kích cỡ phải là mảng" });
+      if (sizes) {
+        for (const size of sizes) {
+          if (!size.name || !size.price || size.price < 0) {
+            return res.status(400).json({ error: "Mỗi kích cỡ phải có tên và giá hợp lệ" });
+          }
         }
       }
       updateData.sizes = sizes;
     }
 
-    if (Object.keys(updateData).length === 0) return res.status(400).send("No fields to update.");
+    if (Object.keys(updateData).length === 0) return res.status(400).send("Không có trường nào để cập nhật");
 
     const updatedItem = await itemService.updateItem(id, updateData);
-    if (!updatedItem) return res.status(404).send("Item not found!");
+    if (!updatedItem) return res.status(404).send("Không tìm thấy món ăn");
 
     res.json({
       status: "SUCCESS",
-      message: "Item updated successfully!",
+      message: "Cập nhật món ăn thành công",
       Item: updatedItem,
     });
   } catch (error) {
-    console.error("Error updating item:", error);
-    res.status(500).json({ error: "Error updating item" });
+    console.error("Lỗi khi cập nhật món ăn:", error);
+    res.status(500).json({ error: "Lỗi khi cập nhật món ăn" });
   }
 };
 
@@ -153,7 +167,7 @@ const searchItem = async (req, res) => {
   try {
     const otherFields = { ...req.query };
     if (!otherFields || Object.keys(otherFields).length === 0) {
-      return res.status(400).send("At least one item info is required.");
+      return res.status(400).send("Cần ít nhất một thông tin món ăn");
     }
     if (otherFields.name) {
       otherFields.name = decodeURIComponent(otherFields.name.replace(/\+/g, " "));
@@ -164,11 +178,11 @@ const searchItem = async (req, res) => {
         : otherFields.categories.split(",");
     }
     const items = await itemService.searchItem(otherFields);
-    if (!items) return res.status(404).json({ message: "No items found matching the criteria" });
+    if (!items) return res.status(404).json({ message: "Không tìm thấy món ăn nào phù hợp" });
     res.status(200).json({ item: items });
   } catch (error) {
-    console.error("Error searching item:", error);
-    res.status(500).json({ error: "Error fetching item" });
+    console.error("Lỗi khi tìm kiếm món ăn:", error);
+    res.status(500).json({ error: "Lỗi khi tìm kiếm món ăn" });
   }
 };
 
@@ -176,26 +190,26 @@ const deleteItem = async (req, res) => {
   try {
     const { id } = req.body;
     const item = await itemService.getItemByItemId(id);
-    if (typeof item === "string") return res.status(404).json({ error: "Item not found" });
+    if (typeof item === "string") return res.status(404).json({ error: "Không tìm thấy món ăn" });
     await Item.findByIdAndDelete(id);
-    res.json({ message: "Item deleted" });
+    res.json({ message: "Xóa món ăn thành công" });
   } catch (error) {
-    console.error("Error deleting item:", error);
-    res.status(500).json({ error: "Error deleting item" });
+    console.error("Lỗi khi xóa món ăn:", error);
+    res.status(500).json({ error: "Lỗi khi xóa món ăn" });
   }
 };
 
 const filterItemsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.query;
-    if (!categoryId) return res.status(400).json({ error: "Category ID is required" });
+    if (!categoryId) return res.status(400).json({ error: "ID danh mục là bắt buộc" });
     const categoryExists = await Category.findById(categoryId);
-    if (!categoryExists) return res.status(404).json({ error: "Category not found" });
+    if (!categoryExists) return res.status(404).json({ error: "Không tìm thấy danh mục" });
     const items = await Item.find({ categories: categoryId }).populate("categories");
     res.json(items);
   } catch (error) {
-    console.error("Error filtering items by category:", error);
-    res.status(500).json({ error: "Error filtering items by category" });
+    console.error("Lỗi khi lọc món ăn theo danh mục:", error);
+    res.status(500).json({ error: "Lỗi khi lọc món ăn theo danh mục" });
   }
 };
 

@@ -8,10 +8,10 @@ async function createItem(itemData) {
 async function updateItem(id, updatedData) {
   try {
     const item = await Item.findByIdAndUpdate(id, updatedData, { new: true }).populate('categories');
-    if (!item) throw new Error("Item not found");
+    if (!item) throw new Error("Không tìm thấy món ăn");
     return item;
   } catch (error) {
-    console.error("Error updating item:", error);
+    console.error("Lỗi khi cập nhật món ăn:", error);
     throw error;
   }
 }
@@ -32,13 +32,13 @@ async function searchItem(criteria) {
   if (criteria.id) conditions._id = criteria.id;
 
   if (criteria.name) {
-    const searchTerm = removeVietnameseAccents(criteria.name); // Bỏ dấu từ khóa tìm kiếm
-    // Tìm trên nameNoAccents, không phân biệt hoa/thường
+    const searchTerm = removeVietnameseAccents(criteria.name);
     conditions.nameNoAccents = { $regex: new RegExp(searchTerm, "i") };
   }
 
-  if (criteria.image) conditions.image = criteria.image;
   if (criteria.price) conditions.price = criteria.price;
+  if (criteria.description) conditions.description = criteria.description;
+  if (criteria.image) conditions.image = criteria.image;
   if (criteria.categories) conditions.categories = { $in: criteria.categories };
 
   if (Object.keys(conditions).length === 0) return false;

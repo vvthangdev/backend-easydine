@@ -12,16 +12,17 @@ function removeVietnameseAccents(str) {
 const itemSchema = new mongoose.Schema({
   name: { type: String, required: true, maxLength: 255 },
   nameNoAccents: { type: String, maxLength: 255 },
-  image: { type: String, required: true, maxLength: 255 },
   price: { type: Number, required: true },
+  description: { type: String, maxLength: 1000 }, // Tùy chọn
+  image: { type: String, maxLength: 255 }, // Tùy chọn
   categories: [{ 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Category' 
-  }],
-  sizes: [{ // Thêm trường sizes
-    name: { type: String, required: true }, // Tên size (ví dụ: "Small", "Large")
-    price: { type: Number, required: true } // Giá cho size
-  }], // Mặc định rỗng
+  }], // Tùy chọn
+  sizes: [{ 
+    name: { type: String, required: true }, 
+    price: { type: Number, required: true } 
+  }], // Tùy chọn
 }, { timestamps: false });
 
 // Middleware để tự động sinh nameNoAccents trước khi lưu
