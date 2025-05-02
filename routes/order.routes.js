@@ -13,12 +13,14 @@ router.get("/my-orders", orderController.getUserOrders);
 router.delete("/delete-order/:id", authMiddleware.adminRoleAuth, orderController.deleteOrder);
 router.get("/order-info", orderController.getOrderInfo);
 router.post("/create-order", orderController.createOrder);
-router.get("/available-tables", orderController.getAvailableTables);
+
 router.get("/search-by-customer", authMiddleware.adminRoleAuth, orderController.searchOrdersByCustomerId);
 
 // Route mới
 router.post("/confirm-order", authMiddleware.adminRoleAuth, orderController.confirmOrder);
 
 router.post("/split-order", authMiddleware.adminRoleAuth, orderController.splitOrder);
+
+router.post("/merge-order", authMiddleware.adminRoleAuth, orderController.mergeOrder);
 
 module.exports = router;

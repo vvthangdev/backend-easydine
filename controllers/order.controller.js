@@ -187,23 +187,61 @@ const updateOrder = async (req, res) => {
 
 const getOrderInfo = async (req, res) => {
   try {
-    const { id } = req.query;
-    if (!id) return res.status(400).json({ error: "Order ID is required" });
+    const { id, table_number } = req.query;
 
-    const order = await OrderDetail.findById(id);
-    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!id && !table_number) {
+      return res.status(400).json({ error: "Either order ID or table_number is required" });
+    }
+    if (id && table_number) {
+      return res.status(400).json({ error: "Please provide either order ID or table_number, not both" });
+    }
 
-    if (req.user.role !== 'ADMIN' && order.customer_id.toString() !== req.user._id) {
+    let order;
+
+    // Tìm đơn hàng bằng ID
+    if (id) {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: "Invalid order ID" });
+      }
+      order = await OrderDetail.findById(id);
+    }
+    // Tìm đơn hàng bằng số bàn
+    else if (table_number) {
+      if (isNaN(table_number)) {
+        return res.status(400).json({ error: "table_number must be a valid number" });
+      }
+
+      const reservedTable = await ReservedTable.findOne({
+        table_id: parseInt(table_number),
+        start_time: { $lte: new Date() },
+        end_time: { $gte: new Date() }
+      });
+
+      if (!reservedTable) {
+        return res.status(404).json({ error: `No active order found for table ${table_number}` });
+      }
+
+      order = await OrderDetail.findById(reservedTable.reservation_id);
+    }
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Kiểm tra quyền truy cập
+    if (req.user.role !== 'ADMIN' && order.customer_id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: "You can only view your own orders" });
     }
 
-    const reservedTables = await ReservedTable.find({ reservation_id: id });
-    const itemOrders = await ItemOrder.find({ order_id: id });
+    // Lấy thông tin bàn và món ăn
+    const reservedTables = await ReservedTable.find({ reservation_id: order._id });
+    const itemOrders = await ItemOrder.find({ order_id: order._id });
     const enrichedItemOrders = await Promise.all(
       itemOrders.map(async (itemOrder) => {
         const item = await Item.findById(itemOrder.item_id);
-        const sizeInfo = item && itemOrder.size && item.sizes ? 
-          item.sizes.find(s => s.name === itemOrder.size) : null;
+        const sizeInfo = item && itemOrder.size && item.sizes
+          ? item.sizes.find(s => s.name === itemOrder.size)
+          : null;
         return {
           ...itemOrder._doc,
           itemName: item ? item.name : null,
@@ -326,24 +364,7 @@ const deleteOrder = async (req, res) => {
   }
 };
 
-const getAvailableTables = async (req, res) => {
-  try {
-    const { start_time, end_time } = req.query;
-    if (!start_time || !end_time) {
-      return res.status(400).json({ error: "start_time and end_time are required" });
-    }
-    const startTime = new Date(start_time);
-    const endTime = new Date(end_time);
-    if (isNaN(startTime) || isNaN(endTime)) {
-      return res.status(400).json({ error: "Invalid date format" });
-    }
-    const availableTables = await orderService.getAvailableTables(startTime, endTime);
-    res.status(200).json(availableTables);
-  } catch (error) {
-    console.error("Error fetching available tables:", error);
-    res.status(500).json({ error: "Error fetching available tables" });
-  }
-};
+
 
 // API xác nhận đơn hàng
 const confirmOrder = async (req, res) => {
@@ -393,23 +414,41 @@ const confirmOrder = async (req, res) => {
 
 // API tách hóa đơn
 const splitOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const { order_id, new_items } = req.body;
-    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
-      return res.status(400).json({ error: "Valid order_id is required" });
+    const { table_number, new_items } = req.body;
+
+    if (!table_number || isNaN(table_number)) {
+      throw new Error("table_number must be a valid number");
     }
     if (!new_items || !Array.isArray(new_items) || new_items.length === 0) {
-      return res.status(400).json({ error: "new_items must be a non-empty array" });
+      throw new Error("new_items must be a non-empty array");
     }
 
-    const originalOrder = await OrderDetail.findById(order_id);
+    // Tìm đơn hàng liên quan đến bàn
+    const reservedTable = await ReservedTable.findOne({
+      table_id: table_number,
+      start_time: { $lte: new Date() },
+      end_time: { $gte: new Date() }
+    }).session(session);
+
+    if (!reservedTable) {
+      throw new Error(`No active order found for table ${table_number}`);
+    }
+
+    const originalOrder = await OrderDetail.findById(reservedTable.reservation_id).session(session);
     if (!originalOrder) {
-      return res.status(404).json({ error: "Original order not found" });
+      throw new Error("Original order not found");
+    }
+    if (!['pending', 'confirmed'].includes(originalOrder.status)) {
+      throw new Error("Can only split orders in pending or confirmed status");
     }
 
-    const originalItemOrders = await ItemOrder.find({ order_id }).lean();
+    // Kiểm tra món ăn
+    const originalItemOrders = await ItemOrder.find({ order_id: originalOrder._id }).lean();
     if (!originalItemOrders.length) {
-      return res.status(400).json({ error: "No items found in original order" });
+      throw new Error("No items found in original order");
     }
 
     const originalQuantities = {};
@@ -424,19 +463,19 @@ const splitOrder = async (req, res) => {
     const newQuantities = {};
     for (const item of new_items) {
       if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
-        return res.status(400).json({ error: "Invalid item ID in new_items" });
+        throw new Error("Invalid item ID in new_items");
       }
       if (!item.quantity || item.quantity < 1) {
-        return res.status(400).json({ error: "Quantity must be a positive number" });
+        throw new Error("Quantity must be a positive number");
       }
-      const itemExists = await Item.findById(item.id);
+      const itemExists = await Item.findById(item.id).session(session);
       if (!itemExists) {
-        return res.status(400).json({ error: `Item with ID ${item.id} not found` });
+        throw new Error(`Item with ID ${item.id} not found`);
       }
       if (item.size) {
         const validSize = itemExists.sizes.find(s => s.name === item.size);
         if (!validSize) {
-          return res.status(400).json({ error: `Invalid size ${item.size} for item ${itemExists.name}` });
+          throw new Error(`Invalid size ${item.size} for item ${itemExists.name}`);
         }
       }
       const itemKey = `${item.id}-${item.size || 'default'}`;
@@ -447,29 +486,19 @@ const splitOrder = async (req, res) => {
       const [itemId, size] = itemKey.split('-');
       const original = originalQuantities[itemId];
       if (!original || (size !== 'default' && original.size !== size) || newQuantities[itemKey] > original.quantity) {
-        return res.status(400).json({ error: "New items exceed original quantities or mismatch size" });
+        throw new Error("New items exceed original quantities or mismatch size");
       }
     }
 
+    // Tạo đơn hàng mới (không có bàn)
     const newOrder = await orderService.createOrder({
       customer_id: originalOrder.customer_id,
       time: originalOrder.time,
       type: originalOrder.type,
       status: originalOrder.status
-    });
+    }, { session });
 
-    const originalReservations = await ReservedTable.find({ reservation_id: order_id }).lean();
-    if (originalOrder.type === 'reservation' && originalReservations.length > 0) {
-      const newReservations = originalReservations.map(res => ({
-        reservation_id: newOrder._id,
-        table_id: res.table_id,
-        start_time: res.start_time,
-        end_time: res.end_time,
-        people_assigned: res.people_assigned
-      }));
-      await orderService.createReservations(newReservations);
-    }
-
+    // Thêm món ăn vào đơn hàng mới
     const newItemOrders = new_items.map(item => ({
       item_id: new mongoose.Types.ObjectId(item.id),
       quantity: item.quantity,
@@ -477,8 +506,9 @@ const splitOrder = async (req, res) => {
       size: item.size || null,
       note: item.note || ""
     }));
-    await orderService.createItemOrders(newItemOrders);
+    await orderService.createItemOrders(newItemOrders, { session });
 
+    // Cập nhật đơn hàng gốc
     const remainingItems = {};
     originalItemOrders.forEach(item => {
       const itemKey = `${item.item_id}-${item.size || 'default'}`;
@@ -493,36 +523,34 @@ const splitOrder = async (req, res) => {
       }
     });
 
-    await ItemOrder.deleteMany({ order_id });
+    await ItemOrder.deleteMany({ order_id: originalOrder._id }).session(session);
     const updatedItemOrders = Object.values(remainingItems).map(item => ({
       item_id: item.item_id,
       quantity: item.quantity,
-      order_id,
+      order_id: originalOrder._id,
       size: item.size,
       note: item.note
     }));
-    await orderService.createItemOrders(updatedItemOrders);
+    await orderService.createItemOrders(updatedItemOrders, { session });
 
-    const user = await getUserByUserId(originalOrder.customer_id);
-    await emailService.sendOrderConfirmationEmail(user.email, user.name, originalOrder);
-    await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
+    // Gửi email xác nhận
+    // const user = await getUserByUserId(originalOrder.customer_id);
+    // await emailService.sendOrderConfirmationEmail(user.email, user.name, originalOrder);
+    // await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
 
-    // Lấy trạng thái bàn cho response
-    const reservedTables = await ReservedTable.find({ reservation_id: order_id }).lean();
-    const tableIds = reservedTables.map(rt => rt.table_id);
-    const tablesInfo = await TableInfo.find({ table_number: { $in: tableIds } }).lean();
+    // Lấy thông tin tất cả bàn của đơn hàng gốc
+    const reservedTables = await ReservedTable.find({ reservation_id: originalOrder._id }).lean();
+    const tableNumbers = reservedTables.map(rt => rt.table_id);
+    const tablesInfo = await TableInfo.find({ table_number: { $in: tableNumbers } }).lean();
+    const tablesWithStatus = tablesInfo.map(table => ({
+      table_number: table.table_number,
+      capacity: table.capacity,
+      status: originalOrder.status === 'pending' ? 'Reserved' : 'Occupied',
+      start_time: reservedTables.find(rt => rt.table_id === table.table_number)?.start_time || null,
+      end_time: reservedTables.find(rt => rt.table_id === table.table_number)?.end_time || null
+    }));
 
-    const tablesWithStatus = tablesInfo.map(table => {
-      const reservedTable = reservedTables.find(rt => rt.table_id === table.table_number);
-      return {
-        table_number: table.table_number,
-        capacity: table.capacity,
-        status: originalOrder.status === 'pending' ? 'Reserved' : 'Occupied',
-        start_time: reservedTable ? reservedTable.start_time : null,
-        end_time: reservedTable ? reservedTable.end_time : null
-      };
-    });
-
+    await session.commitTransaction();
     res.json({
       status: "SUCCESS",
       message: "Order split successfully",
@@ -544,12 +572,193 @@ const splitOrder = async (req, res) => {
           size: item.size,
           note: item.note
         })),
-        tables: tablesWithStatus // Đơn mới có cùng bàn
+        tables: []
       }
     });
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error splitting order:", error);
-    res.status(500).json({ error: "Error splitting order" });
+    res.status(500).json({ error: error.message || "Error splitting order" });
+  } finally {
+    session.endSession();
+  }
+};
+
+const mergeOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { source_table_number, target_table_number } = req.body;
+
+    if (!source_table_number || isNaN(source_table_number)) {
+      throw new Error("source_table_number must be a valid number");
+    }
+    if (!target_table_number || isNaN(target_table_number)) {
+      throw new Error("target_table_number must be a valid number");
+    }
+    if (source_table_number === target_table_number) {
+      throw new Error("Source and target tables must be different");
+    }
+
+    // Tìm đơn hàng nguồn
+    const sourceReservedTable = await ReservedTable.findOne({
+      table_id: source_table_number,
+      start_time: { $lte: new Date() },
+      end_time: { $gte: new Date() }
+    }).session(session);
+
+    if (!sourceReservedTable) {
+      throw new Error(`No active order found for source table ${source_table_number}`);
+    }
+
+    const sourceOrder = await OrderDetail.findById(sourceReservedTable.reservation_id).session(session);
+    if (!sourceOrder) {
+      throw new Error("Source order not found");
+    }
+    if (!['pending', 'confirmed'].includes(sourceOrder.status)) {
+      throw new Error("Can only merge orders in pending or confirmed status");
+    }
+
+    // Tìm đơn hàng đích
+    const targetReservedTable = await ReservedTable.findOne({
+      table_id: target_table_number,
+      start_time: { $lte: new Date() },
+      end_time: { $gte: new Date() }
+    }).session(session);
+
+    if (!targetReservedTable) {
+      throw new Error(`No active order found for target table ${target_table_number}`);
+    }
+
+    const targetOrder = await OrderDetail.findById(targetReservedTable.reservation_id).session(session);
+    if (!targetOrder) {
+      throw new Error("Target order not found");
+    }
+    if (!['pending', 'confirmed'].includes(targetOrder.status)) {
+      throw new Error("Can only merge into orders in pending or confirmed status");
+    }
+    if (sourceOrder._id.toString() === targetOrder._id.toString()) {
+      throw new Error("Source and target orders must be different");
+    }
+
+    // Lấy tất cả món ăn từ đơn nguồn và đích
+    const sourceItemOrders = await ItemOrder.find({ order_id: sourceOrder._id }).session(session);
+    const targetItemOrders = await ItemOrder.find({ order_id: targetOrder._id }).session(session);
+
+    // Tổng hợp món ăn
+    const itemMap = new Map();
+
+    // Xử lý món ăn từ đơn đích
+    for (const item of targetItemOrders) {
+      const key = `${item.item_id}-${item.size || 'default'}`;
+      itemMap.set(key, {
+        item_id: item.item_id,
+        quantity: item.quantity,
+        size: item.size,
+        note: item.note || ''
+      });
+    }
+
+    // Xử lý món ăn từ đơn nguồn, cộng dồn quantity nếu trùng
+    for (const item of sourceItemOrders) {
+      const key = `${item.item_id}-${item.size || 'default'}`;
+      if (itemMap.has(key)) {
+        itemMap.get(key).quantity += item.quantity;
+        // Nếu note khác nhau, nối note (hoặc xử lý theo yêu cầu cụ thể)
+        if (item.note && item.note !== itemMap.get(key).note) {
+          itemMap.get(key).note = `${itemMap.get(key).note ? itemMap.get(key).note + '; ' : ''}${item.note}`;
+        }
+      } else {
+        itemMap.set(key, {
+          item_id: item.item_id,
+          quantity: item.quantity,
+          size: item.size,
+          note: item.note || ''
+        });
+      }
+    }
+
+    // Xóa tất cả món ăn hiện có trong đơn đích
+    await ItemOrder.deleteMany({ order_id: targetOrder._id }).session(session);
+
+    // Thêm danh sách món ăn đã tổng hợp vào đơn đích
+    const newItemOrders = Array.from(itemMap.values()).map(item => ({
+      item_id: item.item_id,
+      quantity: item.quantity,
+      order_id: targetOrder._id,
+      size: item.size,
+      note: item.note
+    }));
+    await orderService.createItemOrders(newItemOrders, { session });
+
+    // Chuyển bàn từ đơn nguồn sang đơn đích
+    await ReservedTable.updateMany(
+      { reservation_id: sourceOrder._id },
+      { reservation_id: targetOrder._id },
+      { session }
+    );
+
+    // Xóa đơn hàng nguồn
+    await ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session);
+    await ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session);
+    await OrderDetail.findByIdAndDelete(sourceOrder._id).session(session);
+
+    // Gửi email xác nhận cho đơn đích
+    const user = await getUserByUserId(targetOrder.customer_id);
+    await emailService.sendOrderConfirmationEmail(user.email, user.name, targetOrder);
+
+    // Lấy thông tin món ăn của đơn đích (đã tổng hợp)
+    const enrichedItemOrders = await Promise.all(
+      newItemOrders.map(async (itemOrder) => {
+        const item = await Item.findById(itemOrder.item_id).session(session);
+        const sizeInfo = item && itemOrder.size && item.sizes
+          ? item.sizes.find(s => s.name === itemOrder.size)
+          : null;
+        return {
+          item_id: itemOrder.item_id,
+          quantity: itemOrder.quantity,
+          size: itemOrder.size,
+          note: itemOrder.note,
+          itemName: item ? item.name : null,
+          itemImage: item ? item.image : null,
+          itemPrice: sizeInfo ? sizeInfo.price : (item ? item.price : null)
+        };
+      })
+    );
+
+    // Lấy thông tin tất cả bàn của đơn đích
+    const reservedTables = await ReservedTable.find({ reservation_id: targetOrder._id }).lean();
+    const tableNumbers = reservedTables.map(rt => rt.table_id);
+    const tablesInfo = await TableInfo.find({ table_number: { $in: tableNumbers } }).lean();
+    const tablesWithStatus = tablesInfo.map(table => ({
+      table_number: table.table_number,
+      capacity: table.capacity,
+      status: targetOrder.status === 'pending' ? 'Reserved' : 'Occupied',
+      start_time: reservedTables.find(rt => rt.table_id === table.table_number)?.start_time || null,
+      end_time: reservedTables.find(rt => rt.table_id === table.table_number)?.end_time || null
+    }));
+
+    await session.commitTransaction();
+    res.json({
+      status: "SUCCESS",
+      message: "Orders merged successfully",
+      mergedOrder: {
+        id: targetOrder._id,
+        customer_id: targetOrder.customer_id,
+        staff_id: targetOrder.staff_id,
+        time: targetOrder.time,
+        type: targetOrder.type,
+        status: targetOrder.status,
+        items: enrichedItemOrders,
+        tables: tablesWithStatus
+      }
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Error merging order:", error);
+    res.status(500).json({ error: error.message || "Error merging order" });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -562,7 +771,7 @@ module.exports = {
   getUserOrders,
   searchOrdersByCustomerId,
   deleteOrder,
-  getAvailableTables,
   confirmOrder,
-  splitOrder
+  splitOrder,
+  mergeOrder,
 };

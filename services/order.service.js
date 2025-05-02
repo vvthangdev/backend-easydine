@@ -123,40 +123,7 @@ async function updateTable(table_number, updatedData) {
   }
 }
 
-async function getAvailableTables(startTime, endTime) {
-  try {
-    // Lấy danh sách các reservation trong khoảng thời gian
-    const reservations = await ReservationTable.find({
-      $or: [
-        { start_time: { $lt: endTime }, end_time: { $gt: startTime } }
-      ]
-    });
 
-    // Lọc các reservation liên quan đến đơn hàng không phải completed hoặc canceled
-    const activeReservations = await Promise.all(
-      reservations.map(async (reservation) => {
-        const order = await OrderDetail.findById(reservation.reservation_id);
-        if (order && !['completed', 'canceled'].includes(order.status)) {
-          return reservation.table_id;
-        }
-        return null;
-      })
-    );
-
-    // Lấy danh sách table_id không khả dụng
-    const reservedTableIds = activeReservations.filter(tableId => tableId !== null);
-
-    // Lấy tất cả các bàn từ TableInfo và lọc ra các bàn khả dụng
-    const availableTables = await TableInfo.find({
-      table_number: { $nin: reservedTableIds }
-    });
-
-    return availableTables;
-  } catch (error) {
-    console.error("Error fetching available tables:", error);
-    throw new Error("Error fetching available tables");
-  }
-}
 
 module.exports = {
   createOrder,
@@ -166,5 +133,4 @@ module.exports = {
   getTableByTableNumber,
   createItemOrders,
   updateOrder,
-  getAvailableTables,
 };

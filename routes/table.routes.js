@@ -17,4 +17,6 @@ router.get("/tables-status", tableController.getAllTablesStatus);
 
 router.post("/release-table", tableController.releaseTable); // Route mới
 
+router.get("/available-tables", tableController.getAvailableTables);
+
 module.exports = router;

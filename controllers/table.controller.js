@@ -163,6 +163,26 @@ const releaseTable = async (req, res) => {
   }
 };
 
+
+const getAvailableTables = async (req, res) => {
+  try {
+    const { start_time, end_time } = req.query;
+    if (!start_time || !end_time) {
+      return res.status(400).json({ error: "start_time and end_time are required" });
+    }
+    const startTime = new Date(start_time);
+    const endTime = new Date(end_time);
+    if (isNaN(startTime) || isNaN(endTime)) {
+      return res.status(400).json({ error: "Invalid date format" });
+    }
+    const availableTables = await tableService.getAvailableTables(startTime, endTime);
+    res.status(200).json(availableTables);
+  } catch (error) {
+    console.error("Error fetching available tables:", error);
+    res.status(500).json({ error: "Error fetching available tables" });
+  }
+};
+
 module.exports = {
   getAllTables,
   createTable,
@@ -170,4 +190,5 @@ module.exports = {
   deleteTable,
   getAllTablesStatus,
   releaseTable,
+  getAvailableTables,
 };
