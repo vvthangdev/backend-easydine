@@ -67,18 +67,25 @@ const getAllTablesStatus = async (req, res) => {
   try {
     const currentTime = new Date();
 
+    // Lấy tất cả các bàn
     const allTables = await TableInfo.find().lean();
 
+    // Lấy các đặt chỗ đang hoạt động trong khoảng thời gian hiện tại
     const activeReservations = await ReservedTable.find({
       start_time: { $lte: currentTime },
       end_time: { $gte: currentTime }
-    }).populate({
-      path: 'reservation_id',
-      match: { status: { $in: ['pending', 'confirmed'] } }
-    }).lean();
+    })
+      .populate({
+        path: 'reservation_id',
+        match: { status: { $in: ['pending', 'confirmed'] } },
+        select: '_id status' // Chỉ lấy các trường cần thiết
+      })
+      .lean();
 
+    // Lọc các đặt chỗ hợp lệ (có reservation_id)
     const validReservations = activeReservations.filter(res => res.reservation_id);
 
+    // Tạo danh sách trạng thái bàn
     const tablesWithStatus = allTables.map(table => {
       const reservation = validReservations.find(res => res.table_id === table.table_number);
       let status = 'Available';
@@ -93,10 +100,11 @@ const getAllTablesStatus = async (req, res) => {
         status,
         start_time: reservation ? reservation.start_time : null,
         end_time: reservation ? reservation.end_time : null,
-        reservation_id: reservation ? reservation.reservation_id._id : null // Đảm bảo trả reservation_id
+        reservation_id: reservation ? reservation.reservation_id._id.toString() : null // Chuyển ObjectId thành string
       };
     });
 
+    // Trả về danh sách trạng thái bàn
     res.json({
       status: "SUCCESS",
       message: "Lấy trạng thái bàn thành công",

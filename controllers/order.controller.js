@@ -588,57 +588,94 @@ const mergeOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { source_table_number, target_table_number } = req.body;
+    const { source_table_number, target_table_number, source_order_id, target_order_id } = req.body;
 
-    if (!source_table_number || isNaN(source_table_number)) {
-      throw new Error("source_table_number must be a valid number");
-    }
-    if (!target_table_number || isNaN(target_table_number)) {
-      throw new Error("target_table_number must be a valid number");
-    }
-    if (source_table_number === target_table_number) {
-      throw new Error("Source and target tables must be different");
-    }
+    // Kiểm tra đầu vào
+    const hasTableNumbers = source_table_number !== undefined && target_table_number !== undefined;
+    const hasOrderIds = source_order_id !== undefined && target_order_id !== undefined;
 
-    // Tìm đơn hàng nguồn
-    const sourceReservedTable = await ReservedTable.findOne({
-      table_id: source_table_number,
-      start_time: { $lte: new Date() },
-      end_time: { $gte: new Date() }
-    }).session(session);
-
-    if (!sourceReservedTable) {
-      throw new Error(`No active order found for source table ${source_table_number}`);
+    if (!hasTableNumbers && !hasOrderIds) {
+      throw new Error("Must provide either source_table_number and target_table_number or source_order_id and target_order_id");
+    }
+    if (hasTableNumbers && hasOrderIds) {
+      throw new Error("Cannot provide both table numbers and order IDs");
     }
 
-    const sourceOrder = await OrderDetail.findById(sourceReservedTable.reservation_id).session(session);
-    if (!sourceOrder) {
-      throw new Error("Source order not found");
+    let sourceOrder, targetOrder;
+
+    // Xử lý dựa trên số bàn
+    if (hasTableNumbers) {
+      if (!source_table_number || isNaN(source_table_number)) {
+        throw new Error("source_table_number must be a valid number");
+      }
+      if (!target_table_number || isNaN(target_table_number)) {
+        throw new Error("target_table_number must be a valid number");
+      }
+      if (source_table_number === target_table_number) {
+        throw new Error("Source and target tables must be different");
+      }
+
+      // Tìm đơn hàng nguồn
+      const sourceReservedTable = await ReservedTable.findOne({
+        table_id: source_table_number,
+        start_time: { $lte: new Date() },
+        end_time: { $gte: new Date() }
+      }).session(session);
+
+      if (!sourceReservedTable) {
+        throw new Error(`No active order found for source table ${source_table_number}`);
+      }
+
+      sourceOrder = await OrderDetail.findById(sourceReservedTable.reservation_id).session(session);
+      if (!sourceOrder) {
+        throw new Error("Source order not found");
+      }
+
+      // Tìm đơn hàng đích
+      const targetReservedTable = await ReservedTable.findOne({
+        table_id: target_table_number,
+        start_time: { $lte: new Date() },
+        end_time: { $gte: new Date() }
+      }).session(session);
+
+      if (!targetReservedTable) {
+        throw new Error(`No active order found for target table ${target_table_number}`);
+      }
+
+      targetOrder = await OrderDetail.findById(targetReservedTable.reservation_id).session(session);
+      if (!targetOrder) {
+        throw new Error("Target order not found");
+      }
     }
+    // Xử lý dựa trên ID đơn hàng
+    else if (hasOrderIds) {
+      if (!mongoose.Types.ObjectId.isValid(source_order_id)) {
+        throw new Error("source_order_id must be a valid ObjectId");
+      }
+      if (!mongoose.Types.ObjectId.isValid(target_order_id)) {
+        throw new Error("target_order_id must be a valid ObjectId");
+      }
+      if (source_order_id === target_order_id) {
+        throw new Error("Source and target orders must be different");
+      }
+
+      sourceOrder = await OrderDetail.findById(source_order_id).session(session);
+      if (!sourceOrder) {
+        throw new Error("Source order not found");
+      }
+
+      targetOrder = await OrderDetail.findById(target_order_id).session(session);
+      if (!targetOrder) {
+        throw new Error("Target order not found");
+      }
+    }
+
+    // Kiểm tra trạng thái đơn hàng
     if (!['pending', 'confirmed'].includes(sourceOrder.status)) {
       throw new Error("Can only merge orders in pending or confirmed status");
     }
-
-    // Tìm đơn hàng đích
-    const targetReservedTable = await ReservedTable.findOne({
-      table_id: target_table_number,
-      start_time: { $lte: new Date() },
-      end_time: { $gte: new Date() }
-    }).session(session);
-
-    if (!targetReservedTable) {
-      throw new Error(`No active order found for target table ${target_table_number}`);
-    }
-
-    const targetOrder = await OrderDetail.findById(targetReservedTable.reservation_id).session(session);
-    if (!targetOrder) {
-      throw new Error("Target order not found");
-    }
     if (!['pending', 'confirmed'].includes(targetOrder.status)) {
       throw new Error("Can only merge into orders in pending or confirmed status");
-    }
-    if (sourceOrder._id.toString() === targetOrder._id.toString()) {
-      throw new Error("Source and target orders must be different");
     }
 
     // Lấy tất cả món ăn từ đơn nguồn và đích
@@ -664,7 +701,7 @@ const mergeOrder = async (req, res) => {
       const key = `${item.item_id}-${item.size || 'default'}`;
       if (itemMap.has(key)) {
         itemMap.get(key).quantity += item.quantity;
-        // Nếu note khác nhau, nối note (hoặc xử lý theo yêu cầu cụ thể)
+        // Nối note nếu khác nhau
         if (item.note && item.note !== itemMap.get(key).note) {
           itemMap.get(key).note = `${itemMap.get(key).note ? itemMap.get(key).note + '; ' : ''}${item.note}`;
         }
