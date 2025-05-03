@@ -107,7 +107,7 @@ const login = async (req, res) => {
 
     if (!refreshToken) {
       return res.status(401).send("Login not successful!");
-    }z
+    }
 
     res.json({
       id: user._id,
