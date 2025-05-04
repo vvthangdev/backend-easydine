@@ -84,7 +84,12 @@ const createOrder = async (req, res) => {
     }
 
     await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
-    res.status(201).json(newOrder);
+
+    res.json({
+      status: "SUCCESS",
+      message: "Order created successfully",
+      newOrder: newOrder
+    });
   } catch (error) {
     console.error("Error creating order:", error);
     res.status(500).json({ error: "Error creating order" });
