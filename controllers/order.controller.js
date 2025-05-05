@@ -20,11 +20,19 @@ const createOrder = async (req, res) => {
       return res.status(400).json({ error: "At least one table is required for reservation" });
     }
 
-    const newOrder = await orderService.createOrder({
+    // Chuẩn bị dữ liệu đơn hàng
+    const newOrderData = {
       customer_id: req.user._id,
       time: new Date(start_time),
       ...orderData
-    });
+    };
+
+    // Nếu trạng thái là confirmed, gán staff_id
+    if (orderData.status === 'confirmed') {
+      newOrderData.staff_id = req.user._id;
+    }
+
+    const newOrder = await orderService.createOrder(newOrderData);
 
     if (orderData.type === 'reservation') {
       const startTime = new Date(start_time);
@@ -88,7 +96,7 @@ const createOrder = async (req, res) => {
     res.json({
       status: "SUCCESS",
       message: "Order created successfully",
-      newOrder: newOrder
+      Order: newOrder
     });
   } catch (error) {
     console.error("Error creating order:", error);
@@ -99,10 +107,10 @@ const createOrder = async (req, res) => {
 const updateOrder = async (req, res) => {
   try {
     const { id, start_time, end_time, tables, items, ...otherFields } = req.body;
-    if (!id) return res.status(400).send("Order ID required.");
+    if (!id) return res.status(400).json({ error: "Order ID required" });
 
     const order = await OrderDetail.findById(id);
-    if (!order) return res.status(404).send("Order not found!");
+    if (!order) return res.status(404).json({ error: "Order not found" });
 
     if (req.user.role !== 'ADMIN' && order.customer_id.toString() !== req.user._id) {
       return res.status(403).json({ error: "You can only update your own orders" });
@@ -111,8 +119,13 @@ const updateOrder = async (req, res) => {
     const updateData = { ...otherFields };
     if (start_time) updateData.time = new Date(start_time);
 
+    // Nếu trạng thái chuyển từ pending sang confirmed, gán staff_id
+    if (order.status === 'pending' && otherFields.status === 'confirmed') {
+      updateData.staff_id = req.user._id;
+    }
+
     const updatedOrder = await orderService.updateOrder(id, updateData);
-    if (!updatedOrder) return res.status(404).send("Order not found!");
+    if (!updatedOrder) return res.status(404).json({ error: "Order not found" });
 
     if (order.type === 'reservation' && tables !== undefined) {
       if (tables.length > 0) {
@@ -181,11 +194,11 @@ const updateOrder = async (req, res) => {
 
     res.json({
       status: "SUCCESS",
-      message: "Order updated successfully!",
+      message: "Order updated successfully",
       Order: updatedOrder
     });
   } catch (error) {
-    console.log(error);
+    console.error("Error updating order:", error);
     res.status(500).json({ error: "Error updating order" });
   }
 };
