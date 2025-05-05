@@ -633,34 +633,34 @@ const mergeOrder = async (req, res) => {
         throw new Error("Source and target tables must be different");
       }
 
-      // Tìm đơn hàng nguồn
-      const sourceReservedTable = await ReservedTable.findOne({
-        table_id: source_table_number,
-        start_time: { $lte: new Date() },
-        end_time: { $gte: new Date() }
-      }).session(session);
+      const [sourceReservedTable, targetReservedTable] = await Promise.all([
+        ReservedTable.findOne({
+          table_id: source_table_number,
+          start_time: { $lte: new Date() },
+          end_time: { $gte: new Date() }
+        }).session(session),
+        ReservedTable.findOne({
+          table_id: target_table_number,
+          start_time: { $lte: new Date() },
+          end_time: { $gte: new Date() }
+        }).session(session)
+      ]);
 
       if (!sourceReservedTable) {
         throw new Error(`No active order found for source table ${source_table_number}`);
       }
-
-      sourceOrder = await OrderDetail.findById(sourceReservedTable.reservation_id).session(session);
-      if (!sourceOrder) {
-        throw new Error("Source order not found");
-      }
-
-      // Tìm đơn hàng đích
-      const targetReservedTable = await ReservedTable.findOne({
-        table_id: target_table_number,
-        start_time: { $lte: new Date() },
-        end_time: { $gte: new Date() }
-      }).session(session);
-
       if (!targetReservedTable) {
         throw new Error(`No active order found for target table ${target_table_number}`);
       }
 
-      targetOrder = await OrderDetail.findById(targetReservedTable.reservation_id).session(session);
+      [sourceOrder, targetOrder] = await Promise.all([
+        OrderDetail.findById(sourceReservedTable.reservation_id).session(session),
+        OrderDetail.findById(targetReservedTable.reservation_id).session(session)
+      ]);
+
+      if (!sourceOrder) {
+        throw new Error("Source order not found");
+      }
       if (!targetOrder) {
         throw new Error("Target order not found");
       }
@@ -677,12 +677,14 @@ const mergeOrder = async (req, res) => {
         throw new Error("Source and target orders must be different");
       }
 
-      sourceOrder = await OrderDetail.findById(source_order_id).session(session);
+      [sourceOrder, targetOrder] = await Promise.all([
+        OrderDetail.findById(source_order_id).session(session),
+        OrderDetail.findById(target_order_id).session(session)
+      ]);
+
       if (!sourceOrder) {
         throw new Error("Source order not found");
       }
-
-      targetOrder = await OrderDetail.findById(target_order_id).session(session);
       if (!targetOrder) {
         throw new Error("Target order not found");
       }
@@ -697,13 +699,14 @@ const mergeOrder = async (req, res) => {
     }
 
     // Lấy tất cả món ăn từ đơn nguồn và đích
-    const sourceItemOrders = await ItemOrder.find({ order_id: sourceOrder._id }).session(session);
-    const targetItemOrders = await ItemOrder.find({ order_id: targetOrder._id }).session(session);
+    const [sourceItemOrders, targetItemOrders] = await Promise.all([
+      ItemOrder.find({ order_id: sourceOrder._id }).session(session),
+      ItemOrder.find({ order_id: targetOrder._id }).session(session)
+    ]);
 
     // Tổng hợp món ăn
     const itemMap = new Map();
 
-    // Xử lý món ăn từ đơn đích
     for (const item of targetItemOrders) {
       const key = `${item.item_id}-${item.size || 'default'}`;
       itemMap.set(key, {
@@ -714,12 +717,10 @@ const mergeOrder = async (req, res) => {
       });
     }
 
-    // Xử lý món ăn từ đơn nguồn, cộng dồn quantity nếu trùng
     for (const item of sourceItemOrders) {
       const key = `${item.item_id}-${item.size || 'default'}`;
       if (itemMap.has(key)) {
         itemMap.get(key).quantity += item.quantity;
-        // Nối note nếu khác nhau
         if (item.note && item.note !== itemMap.get(key).note) {
           itemMap.get(key).note = `${itemMap.get(key).note ? itemMap.get(key).note + '; ' : ''}${item.note}`;
         }
@@ -733,10 +734,8 @@ const mergeOrder = async (req, res) => {
       }
     }
 
-    // Xóa tất cả món ăn hiện có trong đơn đích
+    // Xóa và thêm món ăn vào đơn đích
     await ItemOrder.deleteMany({ order_id: targetOrder._id }).session(session);
-
-    // Thêm danh sách món ăn đã tổng hợp vào đơn đích
     const newItemOrders = Array.from(itemMap.values()).map(item => ({
       item_id: item.item_id,
       quantity: item.quantity,
@@ -754,18 +753,22 @@ const mergeOrder = async (req, res) => {
     );
 
     // Xóa đơn hàng nguồn
-    await ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session);
-    await ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session);
-    await OrderDetail.findByIdAndDelete(sourceOrder._id).session(session);
+    await Promise.all([
+      ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session),
+      ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session),
+      OrderDetail.findByIdAndDelete(sourceOrder._id).session(session)
+    ]);
 
-    // Gửi email xác nhận cho đơn đích
+    await session.commitTransaction();
+
+    // Thực hiện các thao tác ngoài transaction
     const user = await getUserByUserId(targetOrder.customer_id);
     await emailService.sendOrderConfirmationEmail(user.email, user.name, targetOrder);
 
-    // Lấy thông tin món ăn của đơn đích (đã tổng hợp)
+    // Chuẩn bị thông tin món ăn cho response
     const enrichedItemOrders = await Promise.all(
       newItemOrders.map(async (itemOrder) => {
-        const item = await Item.findById(itemOrder.item_id).session(session);
+        const item = await Item.findById(itemOrder.item_id);
         const sizeInfo = item && itemOrder.size && item.sizes
           ? item.sizes.find(s => s.name === itemOrder.size)
           : null;
@@ -781,7 +784,7 @@ const mergeOrder = async (req, res) => {
       })
     );
 
-    // Lấy thông tin tất cả bàn của đơn đích
+    // Lấy thông tin bàn của đơn đích
     const reservedTables = await ReservedTable.find({ reservation_id: targetOrder._id }).lean();
     const tableNumbers = reservedTables.map(rt => rt.table_id);
     const tablesInfo = await TableInfo.find({ table_number: { $in: tableNumbers } }).lean();
@@ -793,11 +796,10 @@ const mergeOrder = async (req, res) => {
       end_time: reservedTables.find(rt => rt.table_id === table.table_number)?.end_time || null
     }));
 
-    await session.commitTransaction();
     res.json({
       status: "SUCCESS",
       message: "Orders merged successfully",
-      mergedOrder: {
+      Order: {
         id: targetOrder._id,
         customer_id: targetOrder.customer_id,
         staff_id: targetOrder.staff_id,
