@@ -3,14 +3,25 @@ require("dotenv").config();
 const userService = require("../services/user.service");
 const authUtil = require("../utils/auth.util");
 const mongoose = require('mongoose');
+const bcrypt = require('bcrypt');
 const { Auth } = require("two-step-auth");
 
 const getAllUsers = async (req, res) => {
   try {
     const users = await userService.getAllUsers();
-    res.json(users);
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Lấy danh sách người dùng thành công!",
+      data: users,
+    });
   } catch (error) {
-    res.status(500).json({ error: "Error fetching users" });
+    console.error("Lỗi khi lấy danh sách người dùng:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi lấy danh sách người dùng!",
+      data: null,
+    });
   }
 };
 
@@ -20,18 +31,38 @@ const userInfo = async (req, res) => {
       { username: req.user.username },
       { refresh_token: 0, password: 0 }
     );
-    res.json(user);
+
+    if (!user) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Lấy thông tin người dùng thành công!",
+      data: user,
+    });
   } catch (error) {
-    res.status(500).json({ error: "Error fetching user info" });
+    console.error("Lỗi khi lấy thông tin người dùng:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi lấy thông tin người dùng!",
+      data: null,
+    });
   }
 };
 
 const signUp = async (req, res) => {
   let { email, password, ...otherFields } = req.body;
+
   if (!password) {
-    return res.json({
-      status: "FAILED",
-      message: "Password is required!",
+    return res.status(400).json({
+      status: "ERROR",
+      message: "Mật khẩu là bắt buộc!",
+      data: null,
     });
   }
 
@@ -41,29 +72,32 @@ const signUp = async (req, res) => {
       password,
       ...otherFields,
     });
-    return res.json({
+
+    return res.status(201).json({
       status: "SUCCESS",
-      message: "Signup successful!",
-      data: newUser.username,
+      message: "Đăng ký thành công!",
+      data: { username: newUser.username },
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      status: "FAILED",
-      message: error.message,
+    console.error("Lỗi khi đăng ký:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Đã xảy ra lỗi khi đăng ký!",
+      data: null,
     });
   }
 };
 
 const login = async (req, res) => {
   let { email, password } = req.body;
+
   try {
     const user = await userService.getUserByEmail(email);
     if (!user) {
       return res.status(401).json({
-        success: false,
-        status: "FAILED",
-        message: "Invalid email or password",
+        status: "ERROR",
+        message: "Email hoặc mật khẩu không đúng!",
+        data: null,
       });
     }
 
@@ -72,7 +106,11 @@ const login = async (req, res) => {
       user.password
     );
     if (!isPasswordValid) {
-      return res.status(401).send("Password incorrect!");
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Mật khẩu không đúng!",
+        data: null,
+      });
     }
 
     const dataForAccessToken = {
@@ -88,7 +126,11 @@ const login = async (req, res) => {
       accessTokenLife
     );
     if (!accessToken) {
-      return res.status(401).send("Login not successful!");
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Đăng nhập không thành công!",
+        data: null,
+      });
     }
 
     const refreshTokenLife = process.env.REFRESH_TOKEN_LIFE;
@@ -106,37 +148,48 @@ const login = async (req, res) => {
     }
 
     if (!refreshToken) {
-      return res.status(401).send("Login not successful!");
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Đăng nhập không thành công!",
+        data: null,
+      });
     }
 
-    res.json({
-      id: user._id,
+    return res.status(200).json({
       status: "SUCCESS",
-      name: user.name,
-      message: "Login successful!",
-      role: user.role,
-      address: user.address,
-      avatar: user.avatar,
-      email: user.email,
-      username: user.username,
-      phone: user.phone,
-      accessToken: `Bearer ${accessToken}`,
-      refreshToken: `Bearer ${refreshToken}`,
+      message: "Đăng nhập thành công!",
+      data: {
+        id: user._id,
+        name: user.name,
+        role: user.role,
+        address: user.address,
+        avatar: user.avatar,
+        email: user.email,
+        username: user.username,
+        phone: user.phone,
+        accessToken: `Bearer ${accessToken}`,
+        refreshToken: `Bearer ${refreshToken}`,
+      },
     });
   } catch (error) {
-    console.log(error);
+    console.error("Lỗi khi đăng nhập:", error);
     return res.status(401).json({
-      success: false,
-      status: "FAILED",
-      message: "Invalid email or password",
+      status: "ERROR",
+      message: "Email hoặc mật khẩu không đúng!",
+      data: null,
     });
   }
 };
 
 const refreshToken = async (req, res) => {
   const refreshToken = req.headers["authorization"]?.split(" ")[1];
+
   if (!refreshToken) {
-    return res.status(403).send("Refresh token is required!");
+    return res.status(403).json({
+      status: "ERROR",
+      message: "Refresh token là bắt buộc!",
+      data: null,
+    });
   }
 
   try {
@@ -158,34 +211,50 @@ const refreshToken = async (req, res) => {
       accessTokenLife
     );
 
-    res.json({
+    return res.status(200).json({
       status: "SUCCESS",
-      accessToken: `Bearer ${newAccessToken}`,
+      message: "Làm mới token thành công!",
+      data: { accessToken: `Bearer ${newAccessToken}` },
     });
   } catch (error) {
-    console.log(error);
-    return res.status(403).send("Invalid refresh token!");
+    console.error("Lỗi khi làm mới token:", error);
+    return res.status(403).json({
+      status: "ERROR",
+      message: "Refresh token không hợp lệ!",
+      data: null,
+    });
   }
 };
 
 const logout = async (req, res) => {
   try {
     await userService.updateRefreshToken(req.user.username, null);
-    res.json({
+
+    return res.status(200).json({
       status: "SUCCESS",
-      message: "Logout successful!",
+      message: "Đăng xuất thành công!",
+      data: null,
     });
   } catch (error) {
-    console.log(error);
-    return res.status(500).send("An error occurred during logout!");
+    console.error("Lỗi khi đăng xuất:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi đăng xuất!",
+      data: null,
+    });
   }
 };
 
 const updateUser = async (req, res) => {
   try {
     const { ...otherFields } = req.body;
+
     if (!otherFields || Object.keys(otherFields).length === 0) {
-      return res.status(400).send("No fields to update.");
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Không có trường nào để cập nhật!",
+        data: null,
+      });
     }
 
     const updatedUser = await userService.updateUser(
@@ -193,65 +262,99 @@ const updateUser = async (req, res) => {
       otherFields
     );
     if (!updatedUser) {
-      return res.status(404).send("User not found!");
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
     }
-    res.json({
+
+    return res.status(200).json({
       status: "SUCCESS",
-      message: "User updated successfully!",
-      user: updatedUser,
+      message: "Cập nhật người dùng thành công!",
+      data: updatedUser,
     });
   } catch (error) {
-    console.log(error);
-    return res.status(500).send("An error occurred while updating the user!");
+    console.error("Lỗi khi cập nhật người dùng:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi cập nhật người dùng!",
+      data: null,
+    });
   }
 };
 
 const deleteUser = async (req, res) => {
   let { password } = req.body;
+
   try {
     const user = await userService.getUserByUserName(req.user.username);
+    if (!user) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
+    }
+
     const isPasswordValid = await userService.validatePassword(
       password,
       user.password
     );
     if (!isPasswordValid) {
-      return res.status(401).send("Password incorrect!");
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Mật khẩu không đúng!",
+        data: null,
+      });
     }
+
     await userService.deleteUser(user.username);
-    res.json({
+
+    return res.status(200).json({
       status: "SUCCESS",
-      message: "User deleted successfully!",
+      message: "Xóa người dùng thành công!",
+      data: null,
     });
   } catch (error) {
-    console.log(error);
-    return res.status(500).send("An error occurred while deleting the user!");
+    console.error("Lỗi khi xóa người dùng:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi xóa người dùng!",
+      data: null,
+    });
   }
 };
 
 const sendOTP = async (req, res) => {
   try {
     const { email } = req.body;
+
     if (!email || typeof email !== "string" || !/\S+@\S+\.\S+/.test(email)) {
-      return res
-        .status(400)
-        .json({ status: "Error", message: "Invalid email address" });
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Địa chỉ email không hợp lệ!",
+        data: null,
+      });
     }
 
     const res1 = await Auth(email, "");
-    console.log("OTP sent successfully:", {
+    console.log("Gửi OTP thành công:", {
       email: res1.mail,
       success: res1.success,
     });
 
     return res.status(200).json({
-      status: "Success",
-      message: "OTP sent successfully",
+      status: "SUCCESS",
+      message: "Gửi OTP thành công!",
+      data: null,
     });
-  } catch (e) {
-    console.error("Error in sendOTP:", e);
+  } catch (error) {
+    console.error("Lỗi khi gửi OTP:", error);
     return res.status(500).json({
-      status: "Error",
-      message: "Internal Server Error",
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi gửi OTP!",
+      data: null,
     });
   }
 };
@@ -261,34 +364,56 @@ const searchUsers = async (req, res) => {
     const { query } = req.query;
 
     if (!query || query.trim() === "") {
-      return res.status(400).send("Search query is required.");
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Chuỗi tìm kiếm là bắt buộc!",
+        data: null,
+      });
     }
 
     const decodedQuery = decodeURIComponent(query.replace(/\+/g, " "));
     const users = await userService.searchUsers(decodedQuery);
-    res.status(200).json(users);
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Tìm kiếm người dùng thành công!",
+      data: users,
+    });
   } catch (error) {
-    console.error("Controller error:", error);
-    res.status(500).json({ error: error.message || "Error searching users" });
+    console.error("Lỗi khi tìm kiếm người dùng:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi tìm kiếm người dùng!",
+      data: null,
+    });
   }
 };
 
 const getUserById = async (req, res) => {
   try {
     const { id } = req.params;
+
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "Valid user ID is required" });
+      return res.status(400).json({
+        status: "ERROR",
+        message: "ID người dùng hợp lệ là bắt buộc!",
+        data: null,
+      });
     }
 
     const user = await User.findById(id, { refresh_token: 0, password: 0 });
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
     }
 
-    res.json({
+    return res.status(200).json({
       status: "SUCCESS",
-      message: "User fetched successfully",
-      user: {
+      message: "Lấy thông tin người dùng thành công!",
+      data: {
         _id: user._id,
         username: user.username,
         email: user.email,
@@ -296,32 +421,41 @@ const getUserById = async (req, res) => {
         role: user.role,
         address: user.address,
         avatar: user.avatar,
-        phone: user.phone
-      }
+        phone: user.phone,
+      },
     });
   } catch (error) {
-    console.error("Error fetching user by ID:", error);
-    res.status(500).json({ error: "Error fetching user" });
+    console.error("Lỗi khi lấy người dùng theo ID:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi lấy thông tin người dùng!",
+      data: null,
+    });
   }
 };
 
 const updateUserByAdmin = async (req, res) => {
   try {
-    const { id } = req.params; // Lấy ID người dùng từ params
+    const { id } = req.params;
     const { email, password, username, name, phone, role, address, avatar } = req.body;
 
-    // Kiểm tra ID hợp lệ
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "Valid user ID is required" });
+      return res.status(400).json({
+        status: "ERROR",
+        message: "ID người dùng hợp lệ là bắt buộc!",
+        data: null,
+      });
     }
 
-    // Kiểm tra xem user có tồn tại
     const user = await User.findById(id);
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
     }
 
-    // Tạo object chứa dữ liệu cần update
     const updateData = {};
     if (email) updateData.email = email;
     if (name) updateData.name = name;
@@ -337,35 +471,40 @@ const updateUserByAdmin = async (req, res) => {
       updateData.password = await bcrypt.hash(password, saltRounds);
     }
 
-    // Kiểm tra email hoặc username mới có trùng với user khác không
     if (email || username) {
       const existingUser = await User.findOne({
         $or: [{ email: updateData.email }, { username: updateData.username }],
-        _id: { $ne: id }
+        _id: { $ne: id },
       });
       if (existingUser) {
-        return res.status(400).json({ error: "Email or username already exists" });
+        return res.status(400).json({
+          status: "ERROR",
+          message: "Email hoặc tên người dùng đã tồn tại!",
+          data: null,
+        });
       }
     }
 
-    // Cập nhật user
     const updatedUser = await User.findByIdAndUpdate(
       id,
       { $set: updateData },
       { new: true, select: "-password -refresh_token" }
     );
 
-    res.json({
+    return res.status(200).json({
       status: "SUCCESS",
-      message: "User updated successfully by admin",
-      user: updatedUser
+      message: "Cập nhật người dùng bởi admin thành công!",
+      data: updatedUser,
     });
   } catch (error) {
-    console.error("Error updating user by admin:", error);
-    res.status(500).json({ error: "Error updating user" });
+    console.error("Lỗi khi cập nhật người dùng bởi admin:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi cập nhật người dùng!",
+      data: null,
+    });
   }
 };
-
 
 module.exports = {
   getAllUsers,
