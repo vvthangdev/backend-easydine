@@ -1,23 +1,23 @@
-const TableInfo = require("../models/table_info.model");
-const tableService = require("../services/table.service");
-const ReservedTable = require("../models/reservation_table.model");
+const TableInfo = require('../models/table_info.model');
+const tableService = require('../services/table.service');
+const ReservedTable = require('../models/reservation_table.model');
 const mongoose = require('mongoose');
-const OrderDetail = require("../models/order_detail.model");
+const OrderDetail = require('../models/order_detail.model');
 
 const getAllTables = async (req, res) => {
   try {
     const tables = await TableInfo.find();
 
     return res.status(200).json({
-      status: "SUCCESS",
-      message: "Lấy danh sách bàn thành công!",
+      status: 'SUCCESS',
+      message: 'Lấy danh sách bàn thành công!',
       data: tables,
     });
   } catch (error) {
-    console.error("Lỗi khi lấy danh sách bàn:", error);
+    console.error('Lỗi khi lấy danh sách bàn:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi lấy danh sách bàn!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi lấy danh sách bàn!',
       data: null,
     });
   }
@@ -25,28 +25,28 @@ const getAllTables = async (req, res) => {
 
 const createTable = async (req, res) => {
   try {
-    const { ...tableData } = req.body;
+    const { table_number, capacity, area } = req.body;
 
-    if (!tableData || Object.keys(tableData).length === 0) {
+    if (!table_number || !capacity) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "Dữ liệu bàn là bắt buộc!",
+        status: 'ERROR',
+        message: 'Số bàn và sức chứa là bắt buộc!',
         data: null,
       });
     }
 
-    const newTable = await tableService.createTable(tableData);
+    const newTable = await tableService.createTable({ table_number, capacity, area });
 
     return res.status(201).json({
-      status: "SUCCESS",
-      message: "Tạo bàn thành công!",
+      status: 'SUCCESS',
+      message: 'Tạo bàn thành công!',
       data: newTable,
     });
   } catch (error) {
-    console.error("Lỗi khi tạo bàn:", error);
+    console.error('Lỗi khi tạo bàn:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi tạo bàn!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi tạo bàn!',
       data: null,
     });
   }
@@ -54,42 +54,42 @@ const createTable = async (req, res) => {
 
 const updateTable = async (req, res) => {
   try {
-    const { table_number, ...otherFields } = req.body;
+    const { table_number, area, ...otherFields } = req.body;
 
-    if (!table_number) {
+    if (!table_number || !area) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "Số bàn là bắt buộc!",
+        status: 'ERROR',
+        message: 'Số bàn và khu vực là bắt buộc!',
         data: null,
       });
     }
     if (!otherFields || Object.keys(otherFields).length === 0) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "Không có trường nào để cập nhật!",
+        status: 'ERROR',
+        message: 'Không có trường nào để cập nhật!',
         data: null,
       });
     }
 
-    const updatedTable = await tableService.updateTable(table_number, otherFields);
+    const updatedTable = await tableService.updateTable({ table_number, area }, otherFields);
     if (!updatedTable) {
       return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy bàn!",
+        status: 'ERROR',
+        message: 'Không tìm thấy bàn!',
         data: null,
       });
     }
 
     return res.status(200).json({
-      status: "SUCCESS",
-      message: "Cập nhật bàn thành công!",
+      status: 'SUCCESS',
+      message: 'Cập nhật bàn thành công!',
       data: updatedTable,
     });
   } catch (error) {
-    console.error("Lỗi khi cập nhật bàn:", error);
+    console.error('Lỗi khi cập nhật bàn:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi cập nhật bàn!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi cập nhật bàn!',
       data: null,
     });
   }
@@ -97,37 +97,37 @@ const updateTable = async (req, res) => {
 
 const deleteTable = async (req, res) => {
   try {
-    const { table_number } = req.body;
+    const { table_number, area } = req.body;
 
-    if (!table_number) {
+    if (!table_number || !area) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "Số bàn là bắt buộc!",
+        status: 'ERROR',
+        message: 'Số bàn và khu vực là bắt buộc!',
         data: null,
       });
     }
 
-    const table = await tableService.getTableByTableNumber(table_number);
+    const table = await tableService.getTableByTableNumber({ table_number, area });
     if (typeof table === 'string') {
       return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy bàn!",
+        status: 'ERROR',
+        message: 'Không tìm thấy bàn!',
         data: null,
       });
     }
 
-    await TableInfo.deleteOne({ table_number });
+    await TableInfo.deleteOne({ table_number, area });
 
     return res.status(200).json({
-      status: "SUCCESS",
-      message: "Xóa bàn thành công!",
+      status: 'SUCCESS',
+      message: 'Xóa bàn thành công!',
       data: null,
     });
   } catch (error) {
-    console.error("Lỗi khi xóa bàn:", error);
+    console.error('Lỗi khi xóa bàn:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi xóa bàn!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi xóa bàn!',
       data: null,
     });
   }
@@ -150,10 +150,10 @@ const getAllTablesStatus = async (req, res) => {
       })
       .lean();
 
-    const validReservations = activeReservations.filter(res => res.reservation_id);
+    const validReservations = activeReservations.filter((res) => res.reservation_id);
 
-    const tablesWithStatus = allTables.map(table => {
-      const reservation = validReservations.find(res => res.table_id === table.table_number);
+    const tablesWithStatus = allTables.map((table) => {
+      const reservation = validReservations.find((res) => res.table_id === table.table_number);
       let status = 'Available';
 
       if (reservation) {
@@ -163,6 +163,7 @@ const getAllTablesStatus = async (req, res) => {
       return {
         table_number: table.table_number,
         capacity: table.capacity,
+        area: table.area, // Thêm trường area
         status,
         start_time: reservation ? reservation.start_time : null,
         end_time: reservation ? reservation.end_time : null,
@@ -171,15 +172,15 @@ const getAllTablesStatus = async (req, res) => {
     });
 
     return res.status(200).json({
-      status: "SUCCESS",
-      message: "Lấy trạng thái bàn thành công!",
+      status: 'SUCCESS',
+      message: 'Lấy trạng thái bàn thành công!',
       data: tablesWithStatus,
     });
   } catch (error) {
-    console.error("Lỗi khi lấy trạng thái bàn:", error);
+    console.error('Lỗi khi lấy trạng thái bàn:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi lấy trạng thái bàn!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi lấy trạng thái bàn!',
       data: null,
     });
   }
@@ -191,15 +192,15 @@ const releaseTable = async (req, res) => {
 
     if (!reservation_id || !mongoose.Types.ObjectId.isValid(reservation_id)) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "reservation_id hợp lệ là bắt buộc!",
+        status: 'ERROR',
+        message: 'reservation_id hợp lệ là bắt buộc!',
         data: null,
       });
     }
     if (!table_id || isNaN(table_id)) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "table_id hợp lệ là bắt buộc!",
+        status: 'ERROR',
+        message: 'table_id hợp lệ là bắt buộc!',
         data: null,
       });
     }
@@ -207,8 +208,8 @@ const releaseTable = async (req, res) => {
     const order = await OrderDetail.findById(reservation_id);
     if (!order) {
       return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy đơn hàng!",
+        status: 'ERROR',
+        message: 'Không tìm thấy đơn hàng!',
         data: null,
       });
     }
@@ -219,8 +220,8 @@ const releaseTable = async (req, res) => {
     });
     if (!reservationTable) {
       return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy đặt chỗ cho bàn!",
+        status: 'ERROR',
+        message: 'Không tìm thấy đặt chỗ cho bàn!',
         data: null,
       });
     }
@@ -231,28 +232,29 @@ const releaseTable = async (req, res) => {
     const tableInfo = await TableInfo.findOne({ table_number: table_id }).lean();
     if (!tableInfo) {
       return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy bàn!",
+        status: 'ERROR',
+        message: 'Không tìm thấy bàn!',
         data: null,
       });
     }
 
     return res.status(200).json({
-      status: "SUCCESS",
-      message: "Bàn đã được trả thành công!",
+      status: 'SUCCESS',
+      message: 'Bàn đã được trả thành công!',
       data: {
         table_number: tableInfo.table_number,
         capacity: tableInfo.capacity,
-        status: "Available",
+        area: tableInfo.area, // Thêm trường area
+        status: 'Available',
         start_time: reservationTable.start_time,
         end_time: reservationTable.end_time,
       },
     });
   } catch (error) {
-    console.error("Lỗi khi trả bàn:", error);
+    console.error('Lỗi khi trả bàn:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi trả bàn!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi trả bàn!',
       data: null,
     });
   }
@@ -264,8 +266,8 @@ const getAvailableTables = async (req, res) => {
 
     if (!start_time || !end_time) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "start_time và end_time là bắt buộc!",
+        status: 'ERROR',
+        message: 'start_time và end_time là bắt buộc!',
         data: null,
       });
     }
@@ -275,8 +277,8 @@ const getAvailableTables = async (req, res) => {
 
     if (isNaN(startTime) || isNaN(endTime)) {
       return res.status(400).json({
-        status: "ERROR",
-        message: "Định dạng ngày không hợp lệ!",
+        status: 'ERROR',
+        message: 'Định dạng ngày không hợp lệ!',
         data: null,
       });
     }
@@ -284,15 +286,15 @@ const getAvailableTables = async (req, res) => {
     const availableTables = await tableService.getAvailableTables(startTime, endTime);
 
     return res.status(200).json({
-      status: "SUCCESS",
-      message: "Lấy danh sách bàn trống thành công!",
+      status: 'SUCCESS',
+      message: 'Lấy danh sách bàn trống thành công!',
       data: availableTables,
     });
   } catch (error) {
-    console.error("Lỗi khi lấy danh sách bàn trống:", error);
+    console.error('Lỗi khi lấy danh sách bàn trống:', error);
     return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi lấy danh sách bàn trống!",
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi lấy danh sách bàn trống!',
       data: null,
     });
   }
