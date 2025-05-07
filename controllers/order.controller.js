@@ -8,11 +8,136 @@ const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
 const mongoose = require('mongoose');
 
-const createOrder = async (req, res) => {
-  try {
-    let { start_time, end_time, tables, items, ...orderData } = req.body;
-    const user = await getUserByUserId(req.user._id);
+// const createOrder = async (req, res) => {
+//   try {
+//     let { start_time, end_time, tables, items, ...orderData } = req.body;
+//     const user = await getUserByUserId(req.user._id);
 
+//     if (!start_time || !end_time) {
+//       return res.status(400).json({
+//         status: "ERROR",
+//         message: "start_time and end_time are required!",
+//         data: null,
+//       });
+//     }
+//     if (orderData.type === 'reservation' && (!tables || tables.length === 0)) {
+//       return res.status(400).json({
+//         status: "ERROR",
+//         message: "At least one table is required for reservation!",
+//         data: null,
+//       });
+//     }
+
+//     const newOrderData = {
+//       customer_id: req.user._id,
+//       time: new Date(start_time),
+//       ...orderData,
+//     };
+
+//     if (orderData.status === 'confirmed') {
+//       newOrderData.staff_id = req.user._id;
+//     }
+
+//     const newOrder = await orderService.createOrder(newOrderData);
+
+//     if (orderData.type === 'reservation') {
+//       const startTime = new Date(start_time);
+//       const endTime = new Date(end_time);
+
+//       const unavailableTables = await orderService.checkUnavailableTables(startTime, endTime, tables);
+//       if (unavailableTables.length > 0) {
+//         await OrderDetail.findByIdAndDelete(newOrder._id);
+//         return res.status(400).json({
+//           status: "ERROR",
+//           message: "Some selected tables are not available!",
+//           data: { unavailable: unavailableTables },
+//         });
+//       }
+
+//       const reservedTables = tables.map(tableId => ({
+//         reservation_id: newOrder._id,
+//         table_id: tableId,
+//         start_time: startTime,
+//         end_time: endTime,
+//       }));
+
+//       await orderService.createReservations(reservedTables);
+//     }
+
+//     if (items && items.length > 0) {
+//       for (const item of items) {
+//         if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
+//           await OrderDetail.findByIdAndDelete(newOrder._id);
+//           return res.status(400).json({
+//             status: "ERROR",
+//             message: "Invalid item ID!",
+//             data: null,
+//           });
+//         }
+//         if (!item.quantity || item.quantity < 1) {
+//           await OrderDetail.findByIdAndDelete(newOrder._id);
+//           return res.status(400).json({
+//             status: "ERROR",
+//             message: "Quantity must be a positive number!",
+//             data: null,
+//           });
+//         }
+//         const itemExists = await Item.findById(item.id);
+//         if (!itemExists) {
+//           await OrderDetail.findByIdAndDelete(newOrder._id);
+//           return res.status(400).json({
+//             status: "ERROR",
+//             message: `Item with ID ${item.id} not found!`,
+//             data: null,
+//           });
+//         }
+//         if (item.size) {
+//           const validSize = itemExists.sizes.find(s => s.name === item.size);
+//           if (!validSize) {
+//             await OrderDetail.findByIdAndDelete(newOrder._id);
+//             return res.status(400).json({
+//               status: "ERROR",
+//               message: `Invalid size ${item.size} for item ${itemExists.name}!`,
+//               data: null,
+//             });
+//           }
+//         }
+//       }
+
+//       let itemOrders = items.map((item) => ({
+//         item_id: new mongoose.Types.ObjectId(item.id),
+//         quantity: item.quantity,
+//         order_id: newOrder._id,
+//         size: item.size || null,
+//         note: item.note || "",
+//       }));
+//       await orderService.createItemOrders(itemOrders);
+//     }
+
+//     await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
+
+//     return res.status(201).json({
+//       status: "SUCCESS",
+//       message: "Order created successfully!",
+//       data: newOrder,
+//     });
+//   } catch (error) {
+//     console.error("Error creating order:", error);
+//     return res.status(500).json({
+//       status: "ERROR",
+//       message: "An error occurred while creating the order!",
+//       data: null,
+//     });
+//   }
+// };
+
+const createOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { start_time, end_time, tables, items, ...orderData } = req.body;
+
+    // Kiểm tra đầu vào
     if (!start_time || !end_time) {
       return res.status(400).json({
         status: "ERROR",
@@ -28,30 +153,27 @@ const createOrder = async (req, res) => {
       });
     }
 
+    // Chuẩn bị dữ liệu đơn hàng
     const newOrderData = {
       customer_id: req.user._id,
       time: new Date(start_time),
       ...orderData,
     };
-
     if (orderData.status === 'confirmed') {
       newOrderData.staff_id = req.user._id;
     }
 
-    const newOrder = await orderService.createOrder(newOrderData);
+    // Tạo đơn hàng
+    const newOrder = await orderService.createOrder(newOrderData, { session });
 
+    // Xử lý đặt bàn nếu là reservation
     if (orderData.type === 'reservation') {
       const startTime = new Date(start_time);
       const endTime = new Date(end_time);
 
       const unavailableTables = await orderService.checkUnavailableTables(startTime, endTime, tables);
       if (unavailableTables.length > 0) {
-        await OrderDetail.findByIdAndDelete(newOrder._id);
-        return res.status(400).json({
-          status: "ERROR",
-          message: "Some selected tables are not available!",
-          data: { unavailable: unavailableTables },
-        });
+        throw new Error("Some selected tables are not available!");
       }
 
       const reservedTables = tables.map(tableId => ({
@@ -60,74 +182,75 @@ const createOrder = async (req, res) => {
         start_time: startTime,
         end_time: endTime,
       }));
-
-      await orderService.createReservations(reservedTables);
+      await orderService.createReservations(reservedTables, { session });
     }
 
+    // Xử lý món ăn
     if (items && items.length > 0) {
+      // Kiểm tra tất cả món ăn trong một truy vấn
+      const itemIds = items.map(item => new mongoose.Types.ObjectId(item.id));
+      const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
+      const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+
       for (const item of items) {
         if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
-          await OrderDetail.findByIdAndDelete(newOrder._id);
-          return res.status(400).json({
-            status: "ERROR",
-            message: "Invalid item ID!",
-            data: null,
-          });
+          throw new Error("Invalid item ID!");
         }
         if (!item.quantity || item.quantity < 1) {
-          await OrderDetail.findByIdAndDelete(newOrder._id);
-          return res.status(400).json({
-            status: "ERROR",
-            message: "Quantity must be a positive number!",
-            data: null,
-          });
+          throw new Error("Quantity must be a positive number!");
         }
-        const itemExists = await Item.findById(item.id);
+        const itemExists = itemMap.get(item.id);
         if (!itemExists) {
-          await OrderDetail.findByIdAndDelete(newOrder._id);
-          return res.status(400).json({
-            status: "ERROR",
-            message: `Item with ID ${item.id} not found!`,
-            data: null,
-          });
+          throw new Error(`Item with ID ${item.id} not found!`);
         }
         if (item.size) {
           const validSize = itemExists.sizes.find(s => s.name === item.size);
           if (!validSize) {
-            await OrderDetail.findByIdAndDelete(newOrder._id);
-            return res.status(400).json({
-              status: "ERROR",
-              message: `Invalid size ${item.size} for item ${itemExists.name}!`,
-              data: null,
-            });
+            throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
           }
         }
       }
 
-      let itemOrders = items.map((item) => ({
+      const itemOrders = items.map((item) => ({
         item_id: new mongoose.Types.ObjectId(item.id),
         quantity: item.quantity,
         order_id: newOrder._id,
         size: item.size || null,
         note: item.note || "",
       }));
-      await orderService.createItemOrders(itemOrders);
+      await orderService.createItemOrders(itemOrders, { session });
     }
 
-    await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
+    await session.commitTransaction();
 
-    return res.status(201).json({
+    // Trả về response ngay lập tức
+    const response = {
       status: "SUCCESS",
       message: "Order created successfully!",
       data: newOrder,
+    };
+
+    // Gửi email bất đồng bộ
+    setImmediate(async () => {
+      try {
+        const user = await getUserByUserId(req.user._id);
+        await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
+      } catch (emailError) {
+        console.error("Error sending order confirmation email:", emailError);
+      }
     });
+
+    return res.status(201).json(response);
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error creating order:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: "An error occurred while creating the order!",
+      message: error.message || "An error occurred while creating the order!",
       data: null,
     });
+  } finally {
+    session.endSession();
   }
 };
 
