@@ -793,11 +793,17 @@ const splitOrder = async (req, res) => {
 };
 
 const mergeOrder = async (req, res) => {
-  const session = await mongoose.startSession();
+  const session = await mongoose.startSession({
+    defaultTransactionOptions: {
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' }, // Đảm bảo dữ liệu được replicate trong replica set
+    }
+  });
   session.startTransaction();
   try {
     const { source_order_id, target_order_id } = req.body;
 
+    // Kiểm tra đầu vào
     if (!source_order_id || !mongoose.Types.ObjectId.isValid(source_order_id)) {
       throw new Error("source_order_id phải là một ObjectId hợp lệ");
     }
@@ -808,6 +814,7 @@ const mergeOrder = async (req, res) => {
       throw new Error("Đơn hàng nguồn và đích phải khác nhau");
     }
 
+    // Lấy thông tin đơn hàng trong transaction
     const [sourceOrder, targetOrder] = await Promise.all([
       OrderDetail.findById(source_order_id).session(session),
       OrderDetail.findById(target_order_id).session(session),
@@ -827,11 +834,13 @@ const mergeOrder = async (req, res) => {
       throw new Error("Chỉ có thể gộp vào đơn hàng ở trạng thái pending hoặc confirmed");
     }
 
+    // Lấy danh sách món ăn
     const [sourceItemOrders, targetItemOrders] = await Promise.all([
       ItemOrder.find({ order_id: sourceOrder._id }).session(session),
       ItemOrder.find({ order_id: targetOrder._id }).session(session),
     ]);
 
+    // Gộp món ăn
     const itemMap = new Map();
     for (const item of targetItemOrders) {
       const key = `${item.item_id}-${item.size || 'default'}`;
@@ -860,6 +869,7 @@ const mergeOrder = async (req, res) => {
       }
     }
 
+    // Xóa món ăn cũ của đơn đích và tạo mới
     await ItemOrder.deleteMany({ order_id: targetOrder._id }).session(session);
     const newItemOrders = Array.from(itemMap.values()).map(item => ({
       item_id: item.item_id,
@@ -870,29 +880,24 @@ const mergeOrder = async (req, res) => {
     }));
     await orderService.createItemOrders(newItemOrders, { session });
 
+    // Chuyển bàn từ đơn nguồn sang đơn đích
     await ReservedTable.updateMany(
       { reservation_id: sourceOrder._id },
       { reservation_id: targetOrder._id },
       { session }
     );
 
+    // Xóa đơn nguồn và các bản ghi liên quan
     await Promise.all([
       ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session),
       ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session),
       OrderDetail.findByIdAndDelete(sourceOrder._id).session(session),
     ]);
 
+    // Cam kết transaction
     await session.commitTransaction();
 
-    setImmediate(async () => {
-      try {
-        const user = await getUserByUserId(targetOrder.customer_id);
-        await emailService.sendOrderConfirmationEmail(user.email, user.name, targetOrder);
-      } catch (emailError) {
-        // No logging
-      }
-    });
-
+    // Chuẩn bị response
     const enrichedItemOrders = await Promise.all(
       newItemOrders.map(async (itemOrder) => {
         const item = await Item.findById(itemOrder.item_id);
@@ -924,7 +929,8 @@ const mergeOrder = async (req, res) => {
       end_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.end_time || null,
     }));
 
-    return res.status(200).json({
+    // Trả response trước
+    const response = {
       status: "SUCCESS",
       message: "Gộp đơn hàng thành công!",
       data: {
@@ -939,7 +945,19 @@ const mergeOrder = async (req, res) => {
           tables: tablesWithStatus,
         },
       },
+    };
+
+    // Gửi email bất đồng bộ sau response
+    setImmediate(async () => {
+      try {
+        const user = await getUserByUserId(targetOrder.customer_id);
+        await emailService.sendOrderConfirmationEmail(user.email, user.name, targetOrder);
+      } catch (emailError) {
+        console.error('Error sending email:', emailError.message); // Thêm logging để debug
+      }
     });
+
+    return res.status(200).json(response);
   } catch (error) {
     await session.abortTransaction();
     return res.status(500).json({

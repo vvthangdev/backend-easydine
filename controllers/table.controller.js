@@ -141,11 +141,13 @@ const deleteTable = async (req, res) => {
 };
 
 const getAllTablesStatus = async (req, res) => {
+  const startTime = Date.now();
 
   try {
     const currentTime = new Date();
 
-    const allTables = await TableInfo.find({}, '_id capacity area').lean();
+    // Lấy tất cả bàn, bao gồm table_number
+    const allTables = await TableInfo.find({}, '_id table_number capacity area').lean();
 
     const activeReservations = await ReservedTable.find({
       start_time: { $lte: currentTime },
@@ -175,7 +177,7 @@ const getAllTablesStatus = async (req, res) => {
 
       return {
         table_id: table._id,
-        table_number: table.table_number,
+        table_number: table.table_number, // Đảm bảo trả về table_number
         capacity: table.capacity,
         area: table.area,
         status,
