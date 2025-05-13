@@ -3,11 +3,12 @@ const OrderDetail = require("../models/order_detail.model");
 const ReservationTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
+const mongoose = require('mongoose');
 
-async function createOrder(orderData) {
+async function createOrder(orderData, options = {}) {
   try {
     const newOrder = new OrderDetail(orderData);
-    await newOrder.save();
+    await newOrder.save(options.session ? { session: options.session } : {});
     return newOrder;
   } catch (error) {
     console.error("Error saving the order:", error);
@@ -15,75 +16,89 @@ async function createOrder(orderData) {
   }
 }
 
-async function checkUnavailableTables(startTime, endTime, tableIds, excludeOrderId = null) {
+
+async function checkUnavailableTables(startTime, endTime, tableIds, excludeOrderId = null, options = {}) {
   try {
     const conditions = {
-      table_id: { $in: tableIds },
+      table_id: { $in: tableIds.map(id => new mongoose.Types.ObjectId(id)) },
       $or: [
         { start_time: { $lt: endTime }, end_time: { $gt: startTime } }
       ]
     };
     if (excludeOrderId) {
-      conditions.reservation_id = { $ne: excludeOrderId };
+      conditions.reservation_id = { $ne: new mongoose.Types.ObjectId(excludeOrderId) };
     }
 
     // Lấy danh sách reservation
-    const reservations = await ReservationTable.find(conditions);
-    // Lọc các reservation liên quan đến đơn hàng không phải completed hoặc canceled
-    const activeReservations = await Promise.all(
-      reservations.map(async (reservation) => {
-        const order = await OrderDetail.findById(reservation.reservation_id);
-        if (order && !['completed', 'canceled'].includes(order.status)) {
-          return reservation.table_id;
-        }
-        return null;
-      })
+    const reservations = await ReservationTable.find(
+      conditions,
+      'reservation_id table_id',
+      options.session ? { session: options.session } : {}
     );
 
-    // Lọc ra các table_id không null (tức là không khả dụng)
-    const reservedTables = activeReservations.filter(tableId => tableId !== null);
+    // Gộp truy vấn để kiểm tra trạng thái đơn hàng
+    const reservationIds = reservations.map(r => r.reservation_id);
+    const orders = await OrderDetail.find(
+      { _id: { $in: reservationIds }, status: { $nin: ['completed', 'canceled'] } },
+      '_id',
+      options.session ? { session: options.session } : {}
+    );
+    const activeOrderIds = new Set(orders.map(o => o._id.toString()));
+
+    // Lọc các reservation liên quan đến đơn hàng đang hoạt động
+    const reservedTables = reservations
+      .filter(r => activeOrderIds.has(r.reservation_id.toString()))
+      .map(r => r.table_id.toString());
+
     return [...new Set(reservedTables)]; // Loại bỏ trùng lặp
   } catch (error) {
-    console.error("Error checking unavailable tables:", error);
-    throw error;
+    console.error("Error checking unavailable tables:", error.message);
+    throw new Error(`Failed to check unavailable tables: ${error.message}`);
   }
 }
 
-async function createReservations(reservedTables) {
+async function createReservations(reservedTables, options = {}) {
   try {
     if (!reservedTables || reservedTables.length === 0) {
       throw new Error('No tables to reserve');
     }
 
-    const createdReservations = [];
-    for (let reservationData of reservedTables) {
-      const { reservation_id, table_id, start_time, end_time } = reservationData;
-
-      const table = await TableInfo.findOne({ table_number: table_id });
-      if (!table) throw new Error(`Table with number ${table_id} not found`);
-
-      const newReservation = new ReservationTable({
-        reservation_id,
-        table_id,
-        start_time,
-        end_time
-      });
-      await newReservation.save();
-      createdReservations.push(newReservation);
+    // Kiểm tra tất cả bàn trong một truy vấn
+    const tableIds = reservedTables.map(r => new mongoose.Types.ObjectId(r.table_id));
+    const tables = await TableInfo.find(
+      { _id: { $in: tableIds } },
+      null,
+      options.session ? { session: options.session } : {}
+    );
+    if (tables.length !== tableIds.length) {
+      const missingIds = tableIds.filter(id => !tables.some(t => t._id.equals(id)));
+      throw new Error(`Tables with IDs ${missingIds.join(', ')} not found`);
     }
+
+    const newReservations = reservedTables.map(({ reservation_id, table_id, start_time, end_time }) => ({
+      reservation_id: new mongoose.Types.ObjectId(reservation_id),
+      table_id: new mongoose.Types.ObjectId(table_id),
+      start_time,
+      end_time
+    }));
+
+    const createdReservations = await ReservationTable.insertMany(
+      newReservations,
+      options.session ? { session: options.session } : {}
+    );
     return createdReservations;
   } catch (error) {
-    console.error('Error creating reservations:', error);
-    throw new Error('Error saving the Reservations');
+    console.error('Error creating reservations:', error.message);
+    throw new Error(`Failed to create reservations: ${error.message}`);
   }
 }
 
-async function createItemOrders(itemOrders) {
+async function createItemOrders(itemOrders, options = {}) {
   try {
     if (!itemOrders || itemOrders.length === 0) {
       return [];
     }
-    const createdItemOrders = await ItemOrder.insertMany(itemOrders);
+    const createdItemOrders = await ItemOrder.insertMany(itemOrders, options.session ? { session: options.session } : {});
     return createdItemOrders;
   } catch (error) {
     console.error("Error creating item orders:", error);
@@ -91,9 +106,12 @@ async function createItemOrders(itemOrders) {
   }
 }
 
-async function updateOrder(id, data) {
+async function updateOrder(id, data, options = {}) {
   try {
-    const order = await OrderDetail.findByIdAndUpdate(id, data, { new: true });
+    const order = await OrderDetail.findByIdAndUpdate(id, data, {
+      new: true,
+      session: options.session || null
+    });
     if (!order) return null;
     return order;
   } catch (error) {
@@ -102,20 +120,20 @@ async function updateOrder(id, data) {
   }
 }
 
-async function getTableByTableNumber(table_number) {
+async function getTableById(table_id) {
   try {
-    const table = await TableInfo.findOne({ table_number });
-    return table || `Không tìm thấy bàn với số bàn: ${table_number}`;
+    const table = await TableInfo.findById(table_id);
+    return table || `Không tìm thấy bàn với ID: ${table_id}`;
   } catch (error) {
     console.error("Lỗi khi truy vấn:", error);
     throw error;
   }
 }
 
-async function updateTable(table_number, updatedData) {
+async function updateTable(table_id, updatedData) {
   try {
-    const table = await TableInfo.findOneAndUpdate({ table_number }, updatedData, { new: true });
-    if (!table) throw new Error("Table not found");
+    const table = await TableInfo.findByIdAndUpdate(table_id, updatedData, { new: true });
+    if (!table) throw new Error(`Table with ID ${table_id} not found`);
     return table;
   } catch (error) {
     console.log(error);
@@ -123,14 +141,12 @@ async function updateTable(table_number, updatedData) {
   }
 }
 
-
-
 module.exports = {
   createOrder,
   createReservations,
   checkUnavailableTables,
   updateTable,
-  getTableByTableNumber,
+  getTableById,
   createItemOrders,
   updateOrder,
 };

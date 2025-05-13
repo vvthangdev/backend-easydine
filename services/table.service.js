@@ -4,9 +4,8 @@ const OrderDetail = require('../models/order_detail.model');
 
 async function createTable(tableData) {
   try {
-    // Kiểm tra dữ liệu đầu vào
-    if (!tableData.table_number || !tableData.capacity) {
-      throw new Error('Số bàn và sức chứa là bắt buộc');
+    if (!tableData.capacity) {
+      throw new Error('Sức chứa là bắt buộc');
     }
     const newTable = new TableInfo(tableData);
     return await newTable.save();
@@ -16,10 +15,10 @@ async function createTable(tableData) {
   }
 }
 
-async function updateTable({ table_number, area }, updatedData) {
+async function updateTable({ table_id, area }, updatedData) {
   try {
     const table = await TableInfo.findOneAndUpdate(
-      { table_number, area }, // Truy vấn dựa trên cả table_number và area
+      { _id: table_id, area },
       updatedData,
       { new: true }
     );
@@ -31,10 +30,10 @@ async function updateTable({ table_number, area }, updatedData) {
   }
 }
 
-async function getTableByTableNumber({ table_number, area }) {
+async function getTableByTableId({ table_id }) {
   try {
-    const table = await TableInfo.findOne({ table_number, area });
-    return table || `Không tìm thấy bàn với số bàn: ${table_number} ở khu vực: ${area}`;
+    const table = await TableInfo.findById(table_id);
+    return table || `Không tìm thấy bàn với ID: ${table_id}`;
   } catch (error) {
     console.error('Lỗi khi truy vấn:', error);
     throw error;
@@ -59,9 +58,8 @@ async function getAvailableTables(startTime, endTime) {
 
     const reservedTableIds = activeReservations.filter((tableId) => tableId !== null);
 
-    // Lấy danh sách bàn trống, bao gồm cả trường area
     const availableTables = await TableInfo.find({
-      table_number: { $nin: reservedTableIds },
+      _id: { $nin: reservedTableIds },
     });
 
     return availableTables;
@@ -74,6 +72,6 @@ async function getAvailableTables(startTime, endTime) {
 module.exports = {
   createTable,
   updateTable,
-  getTableByTableNumber,
+  getTableByTableId,
   getAvailableTables,
 };

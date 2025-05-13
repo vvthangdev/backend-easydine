@@ -27,10 +27,10 @@ const createTable = async (req, res) => {
   try {
     const { table_number, capacity, area } = req.body;
 
-    if (!table_number || !capacity) {
+    if (!capacity) {
       return res.status(400).json({
         status: 'ERROR',
-        message: 'Số bàn và sức chứa là bắt buộc!',
+        message: 'Sức chứa là bắt buộc!',
         data: null,
       });
     }
@@ -54,12 +54,19 @@ const createTable = async (req, res) => {
 
 const updateTable = async (req, res) => {
   try {
-    const { table_number, area, ...otherFields } = req.body;
+    const { table_id, area, ...otherFields } = req.body;
 
-    if (!table_number || !area) {
+    if (!table_id || !mongoose.Types.ObjectId.isValid(table_id)) {
       return res.status(400).json({
         status: 'ERROR',
-        message: 'Số bàn và khu vực là bắt buộc!',
+        message: 'table_id hợp lệ là bắt buộc!',
+        data: null,
+      });
+    }
+    if (!area) {
+      return res.status(400).json({
+        status: 'ERROR',
+        message: 'Khu vực là bắt buộc!',
         data: null,
       });
     }
@@ -71,7 +78,7 @@ const updateTable = async (req, res) => {
       });
     }
 
-    const updatedTable = await tableService.updateTable({ table_number, area }, otherFields);
+    const updatedTable = await tableService.updateTable({ table_id, area }, otherFields);
     if (!updatedTable) {
       return res.status(404).json({
         status: 'ERROR',
@@ -97,17 +104,17 @@ const updateTable = async (req, res) => {
 
 const deleteTable = async (req, res) => {
   try {
-    const { table_number, area } = req.body;
+    const { table_id } = req.body;
 
-    if (!table_number || !area) {
+    if (!table_id || !mongoose.Types.ObjectId.isValid(table_id)) {
       return res.status(400).json({
         status: 'ERROR',
-        message: 'Số bàn và khu vực là bắt buộc!',
+        message: 'table_id hợp lệ là bắt buộc!',
         data: null,
       });
     }
 
-    const table = await tableService.getTableByTableNumber({ table_number, area });
+    const table = await tableService.getTableByTableId({ table_id });
     if (typeof table === 'string') {
       return res.status(404).json({
         status: 'ERROR',
@@ -116,7 +123,7 @@ const deleteTable = async (req, res) => {
       });
     }
 
-    await TableInfo.deleteOne({ table_number, area });
+    await TableInfo.deleteOne({ _id: table_id });
 
     return res.status(200).json({
       status: 'SUCCESS',
@@ -134,10 +141,11 @@ const deleteTable = async (req, res) => {
 };
 
 const getAllTablesStatus = async (req, res) => {
+
   try {
     const currentTime = new Date();
 
-    const allTables = await TableInfo.find().lean();
+    const allTables = await TableInfo.find({}, '_id capacity area').lean();
 
     const activeReservations = await ReservedTable.find({
       start_time: { $lte: currentTime },
@@ -148,12 +156,17 @@ const getAllTablesStatus = async (req, res) => {
         match: { status: { $in: ['pending', 'confirmed'] } },
         select: '_id status',
       })
+      .select('table_id reservation_id start_time end_time')
       .lean();
 
     const validReservations = activeReservations.filter((res) => res.reservation_id);
 
+    const reservationMap = new Map(
+      validReservations.map((res) => [res.table_id.toString(), res])
+    );
+
     const tablesWithStatus = allTables.map((table) => {
-      const reservation = validReservations.find((res) => res.table_id === table.table_number);
+      const reservation = reservationMap.get(table._id.toString());
       let status = 'Available';
 
       if (reservation) {
@@ -161,26 +174,27 @@ const getAllTablesStatus = async (req, res) => {
       }
 
       return {
+        table_id: table._id,
         table_number: table.table_number,
         capacity: table.capacity,
-        area: table.area, // Thêm trường area
+        area: table.area,
         status,
-        start_time: reservation ? reservation.start_time : null,
-        end_time: reservation ? reservation.end_time : null,
+        start_time: reservation ? reservation.start_time.toISOString() : null,
+        end_time: reservation ? reservation.end_time.toISOString() : null,
         reservation_id: reservation ? reservation.reservation_id._id.toString() : null,
       };
     });
 
     return res.status(200).json({
       status: 'SUCCESS',
-      message: 'Lấy trạng thái bàn thành công!',
+      message: 'Lấy trạng thái bàn thành công',
       data: tablesWithStatus,
     });
   } catch (error) {
-    console.error('Lỗi khi lấy trạng thái bàn:', error);
+    console.error(`[${new Date().toISOString()}] Error in getAllTablesStatus:`, error.message);
     return res.status(500).json({
       status: 'ERROR',
-      message: 'Đã xảy ra lỗi khi lấy trạng thái bàn!',
+      message: `Đã xảy ra lỗi khi lấy trạng thái bàn: ${error.message}`,
       data: null,
     });
   }
@@ -197,7 +211,7 @@ const releaseTable = async (req, res) => {
         data: null,
       });
     }
-    if (!table_id || isNaN(table_id)) {
+    if (!table_id || !mongoose.Types.ObjectId.isValid(table_id)) {
       return res.status(400).json({
         status: 'ERROR',
         message: 'table_id hợp lệ là bắt buộc!',
@@ -229,7 +243,7 @@ const releaseTable = async (req, res) => {
     reservationTable.end_time = new Date();
     await reservationTable.save();
 
-    const tableInfo = await TableInfo.findOne({ table_number: table_id }).lean();
+    const tableInfo = await TableInfo.findById(table_id).lean();
     if (!tableInfo) {
       return res.status(404).json({
         status: 'ERROR',
@@ -242,9 +256,9 @@ const releaseTable = async (req, res) => {
       status: 'SUCCESS',
       message: 'Bàn đã được trả thành công!',
       data: {
-        table_number: tableInfo.table_number,
+        table_id: tableInfo._id,
         capacity: tableInfo.capacity,
-        area: tableInfo.area, // Thêm trường area
+        area: tableInfo.area,
         status: 'Available',
         start_time: reservationTable.start_time,
         end_time: reservationTable.end_time,
