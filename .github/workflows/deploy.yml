@@ -29,16 +29,6 @@ jobs:
           push: true
           tags: arisdev2k2/backend-easydine:latest
 
-      - name: Debug Secrets
-        run: |
-          echo "PORT is set: ${{ secrets.PORT != '' }}"
-          echo "END_TIME_OFFSET_MINUTES is set: ${{ secrets.END_TIME_OFFSET_MINUTES != '' }}"
-          echo "EMAIL_USER is set: ${{ secrets.EMAIL_USER != '' }}"
-          echo "GOOGLE_CLIENT_ID is set: ${{ secrets.GOOGLE_CLIENT_ID != '' }}"
-          echo "GOOGLE_CALLBACK_URL is set: ${{ secrets.GOOGLE_CALLBACK_URL != '' }}"
-          echo "SERVER_IP is set: ${{ secrets.SERVER_IP != '' }}"
-          echo "SERVER_USER is set: ${{ secrets.SERVER_USER != '' }}"
-
       - name: Deploy to Server
         uses: appleboy/ssh-action@master
         env:
@@ -56,54 +46,36 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_CALLBACK_URL: ${{ secrets.GOOGLE_CALLBACK_URL }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
+          envs: PORT,MONGO_URI,ACCESS_TOKEN_SECRET,ACCESS_TOKEN_LIFE,REFRESH_TOKEN_SECRET,REFRESH_TOKEN_LIFE,REFRESH_TOKEN_SIZE,END_TIME_OFFSET_MINUTES,EMAIL_USER,EMAIL_PASS,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_CALLBACK_URL,SESSION_SECRET
           script: |
-            if ! command -v docker &> /dev/null; then
-              sudo apt update
-              sudo apt install -y docker.io
-              sudo systemctl start docker
-              sudo systemctl enable docker
-              sudo usermod -aG docker ${{ secrets.SERVER_USER }}
-            fi
-            if ! command -v docker-compose &> /dev/null; then
-              sudo apt install -y docker-compose
-            fi
-
-            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-
             if ! docker network ls | grep -q mongo_app-network; then
               docker network create mongo_app-network
             fi
 
-            cd /home/aris/backend-easydine
-            git pull origin main
+            cd ~/backend-easydine
             docker pull arisdev2k2/backend-easydine:latest
             docker-compose down
+            
+            # Chạy docker-compose với tất cả các biến môi trường
+            PORT="${PORT}" \
+            MONGO_URI="${MONGO_URI}" \
+            ACCESS_TOKEN_SECRET="${ACCESS_TOKEN_SECRET}" \
+            ACCESS_TOKEN_LIFE="${ACCESS_TOKEN_LIFE}" \
+            REFRESH_TOKEN_SECRET="${REFRESH_TOKEN_SECRET}" \
+            REFRESH_TOKEN_LIFE="${REFRESH_TOKEN_LIFE}" \
+            REFRESH_TOKEN_SIZE="${REFRESH_TOKEN_SIZE}" \
+            END_TIME_OFFSET_MINUTES="${END_TIME_OFFSET_MINUTES}" \
+            EMAIL_USER="${EMAIL_USER}" \
+            EMAIL_PASS="${EMAIL_PASS}" \
+            GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
+            GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
+            GOOGLE_CALLBACK_URL="${GOOGLE_CALLBACK_URL}" \
+            SESSION_SECRET="${SESSION_SECRET}" \
+            docker-compose up -d
 
-            PORT="$PORT" \
-            MONGO_URI="$MONGO_URI" \
-            ACCESS_TOKEN_SECRET="$ACCESS_TOKEN_SECRET" \
-            ACCESS_TOKEN_LIFE="$ACCESS_TOKEN_LIFE" \
-            REFRESH_TOKEN_SECRET="$REFRESH_TOKEN_SECRET" \
-            REFRESH_TOKEN_LIFE="$REFRESH_TOKEN_LIFE" \
-            REFRESH_TOKEN_SIZE="$REFRESH_TOKEN_SIZE" \
-            END_TIME_OFFSET_MINUTES="$END_TIME_OFFSET_MINUTES" \
-            EMAIL_USER="$EMAIL_USER" \
-            EMAIL_PASS="$EMAIL_PASS" \
-            GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
-            GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
-            GOOGLE_CALLBACK_URL="$GOOGLE_CALLBACK_URL" \
-            SESSION_SECRET="$SESSION_SECRET" \
-            docker-compose up -d --build
-
+            # Dọn dẹp các image cũ
             docker image prune -f
-
-      - name: Check Server Health
-        run: |
-          sleep 30
-          curl -f https://vuvanthang.website || exit 1
