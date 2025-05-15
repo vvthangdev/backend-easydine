@@ -76,7 +76,13 @@ jobs:
             # Triển khai backend
             cd /home/aris/backend-easydine
             git pull origin main
+
+            # Kéo image mới từ Docker Hub
+            docker pull arisdev2k2/backend-easydine:latest
+
+            # Dừng và xóa container cũ
             docker-compose down
+
             # Chạy docker-compose với các biến môi trường
             PORT="$PORT" \
             MONGO_URI="$MONGO_URI" \
@@ -93,6 +99,7 @@ jobs:
             GOOGLE_CALLBACK_URL="$GOOGLE_CALLBACK_URL" \
             SESSION_SECRET="$SESSION_SECRET" \
             docker-compose up -d
+
             # Dọn dẹp image không dùng
             docker image prune -f
 
