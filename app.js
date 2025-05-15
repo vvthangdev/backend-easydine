@@ -17,6 +17,8 @@ app.use(express.json());
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
+
+console.log(process.env.GOOGLE_CLIENT_ID)
 // Cấu hình session
 app.use(
   session({
