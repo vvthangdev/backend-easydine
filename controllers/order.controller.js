@@ -289,6 +289,7 @@ const getOrderInfo = async (req, res) => {
   try {
     const { id, table_id } = req.query;
 
+    // Kiểm tra đầu vào
     if (!id && !table_id) {
       return res.status(400).json({
         status: "ERROR",
@@ -306,6 +307,7 @@ const getOrderInfo = async (req, res) => {
 
     let order;
 
+    // Tìm đơn hàng theo ID
     if (id) {
       if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).json({
@@ -314,8 +316,10 @@ const getOrderInfo = async (req, res) => {
           data: null,
         });
       }
-      order = await OrderDetail.findById(id);
-    } else if (table_id) {
+      order = await OrderDetail.findById(id).lean(); // Sử dụng .lean() để tối ưu
+    }
+    // Tìm đơn hàng theo table_id
+    else if (table_id) {
       if (!mongoose.Types.ObjectId.isValid(table_id)) {
         return res.status(400).json({
           status: "ERROR",
@@ -329,7 +333,7 @@ const getOrderInfo = async (req, res) => {
         table_id: new mongoose.Types.ObjectId(table_id),
         start_time: { $lte: currentTime },
         end_time: { $gte: currentTime },
-      });
+      }).lean();
 
       if (!reservedTable) {
         return res.status(404).json({
@@ -339,7 +343,7 @@ const getOrderInfo = async (req, res) => {
         });
       }
 
-      order = await OrderDetail.findById(reservedTable.reservation_id);
+      order = await OrderDetail.findById(reservedTable.reservation_id).lean();
     }
 
     if (!order) {
@@ -350,17 +354,10 @@ const getOrderInfo = async (req, res) => {
       });
     }
 
-    if (order.customer_id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        status: "ERROR",
-        message: "You can only view your own orders!",
-        data: null,
-      });
-    }
-
-    const reservedTables = await ReservedTable.find({ reservation_id: order._id });
+    // Lấy thông tin bàn
+    const reservedTables = await ReservedTable.find({ reservation_id: order._id }).lean();
     const tableIds = reservedTables.map(rt => rt.table_id);
-    const tablesInfo = await TableInfo.find({ _id: { $in: tableIds } });
+    const tablesInfo = await TableInfo.find({ _id: { $in: tableIds } }).lean();
     const enrichedTables = tablesInfo.map(table => ({
       table_id: table._id,
       table_number: table.table_number,
@@ -371,20 +368,24 @@ const getOrderInfo = async (req, res) => {
       end_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.end_time || null,
     }));
 
-    const itemOrders = await ItemOrder.find({ order_id: order._id });
+    // Lấy thông tin món ăn
+    const itemOrders = await ItemOrder.find({ order_id: order._id }).lean();
     const enrichedItemOrders = await Promise.all(
       itemOrders.map(async (itemOrder) => {
-        const item = await Item.findById(itemOrder.item_id);
+        const item = await Item.findById(itemOrder.item_id).lean();
         const sizeInfo = item && itemOrder.size && item.sizes
           ? item.sizes.find(s => s.name === itemOrder.size)
           : null;
         return {
-          ...itemOrder._doc,
+          _id: itemOrder._id,
+          item_id: itemOrder.item_id,
+          quantity: itemOrder.quantity,
+          order_id: itemOrder.order_id,
+          size: itemOrder.size,
+          note: itemOrder.note,
           itemName: item ? item.name : null,
           itemImage: item ? item.image : null,
           itemPrice: sizeInfo ? sizeInfo.price : (item ? item.price : null),
-          size: itemOrder.size,
-          note: itemOrder.note,
         };
       })
     );
@@ -408,7 +409,7 @@ const getOrderInfo = async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       status: "ERROR",
-      message: "An error occurred while fetching order info!",
+      message: error.message || "An error occurred while fetching order info!",
       data: null,
     });
   }
