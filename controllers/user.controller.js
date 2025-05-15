@@ -506,6 +506,56 @@ const updateUserByAdmin = async (req, res) => {
   }
 };
 
+const googleLoginCallback = async (req, res) => {
+  try {
+    const user = req.user;
+
+    const dataForAccessToken = {
+      username: user.username,
+      role: user.role,
+    };
+
+    const accessTokenLife = process.env.ACCESS_TOKEN_LIFE;
+    const accessTokenSecret = process.env.ACCESS_TOKEN_SECRET;
+    const accessToken = await authUtil.generateToken(
+      dataForAccessToken,
+      accessTokenSecret,
+      accessTokenLife
+    );
+
+    const refreshTokenLife = process.env.REFRESH_TOKEN_LIFE;
+    const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
+    let refreshToken = await authUtil.generateToken(
+      dataForAccessToken,
+      refreshTokenSecret,
+      refreshTokenLife
+    );
+
+    if (!user.refresh_token) {
+      await userService.updateRefreshToken(user.username, refreshToken);
+    } else {
+      refreshToken = user.refresh_token;
+    }
+
+    const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
+      JSON.stringify({
+        id: user._id,
+        name: user.name,
+        role: user.role,
+        address: user.address,
+        avatar: user.avatar,
+        email: user.email,
+        username: user.username,
+        phone: user.phone,
+      })
+    )}`;
+    return res.redirect(redirectUrl);
+  } catch (error) {
+    console.error("Lỗi khi đăng nhập Google:", error);
+    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=google_login_failed`);
+  }
+};
+
 module.exports = {
   getAllUsers,
   userInfo,
@@ -519,4 +569,5 @@ module.exports = {
   searchUsers,
   getUserById,
   updateUserByAdmin,
+  googleLoginCallback,
 };

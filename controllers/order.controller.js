@@ -435,7 +435,7 @@ const getAllOrders = async (req, res) => {
 
 const getAllOrdersInfo = async (req, res) => {
   try {
-    const orders = await OrderDetail.find({ customer_id: req.user._id });
+    const orders = await OrderDetail.find();
 
     const enrichedOrders = await Promise.all(
       orders.map(async (order) => {

@@ -4,6 +4,9 @@ const userController = require("../controllers/user.controller.js");
 const userUtil = require("../utils/user.util.js");
 const authMiddleware = require("../middlewares/auth.middleware.js");
 
+const passport = require("passport");
+const rateLimit = require("express-rate-limit");
+
 const router = express.Router();
 
 router.get("/all-users", userController.getAllUsers);
@@ -27,5 +30,20 @@ router.patch(
     authMiddleware.adminRoleAuth,
     userController.updateUserByAdmin
   );
+
+  // Rate limit cho Google login
+const googleLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 phút
+  max: 10,
+  message: "Quá nhiều yêu cầu đăng nhập Google, vui lòng thử lại sau!",
+});
+
+// Route cho Google OAuth
+router.get("/auth/google", googleLoginLimiter, passport.authenticate("google", { scope: ["profile", "email"] }));
+router.get(
+  "/auth/google/callback",
+  passport.authenticate("google", { failureRedirect: "https://vuvanthang.website/login?error=auth_failed" }),
+  userController.googleLoginCallback
+);
 
 module.exports = router;

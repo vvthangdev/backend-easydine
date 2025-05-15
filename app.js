@@ -1,3 +1,4 @@
+// index.js
 const express = require("express");
 const cors = require("cors");
 const app = express();
@@ -8,11 +9,30 @@ const server = createServer(app);
 const io = new Server(server);
 const multer = require("multer");
 const fs = require("fs");
-
-// Cấu hình multer để xử lý form-data (không lưu file)
+const session = require("express-session");
+const passport = require("passport");
+require("dotenv").config();
+console.log("SESSION_SECRET:", process.env.SESSION_SECRET);
 const upload = multer();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// Cấu hình session
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: process.env.NODE_ENV === "production" }, // Secure trong production
+  })
+);
+
+// Khởi tạo Passport
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Load Google Strategy
+require("./config/passport")(passport);
 
 // Hàm đọc secret từ file
 const readSecret = (secretName) => {
@@ -27,10 +47,8 @@ const readSecret = (secretName) => {
   return null;
 };
 
-// Tải biến môi trường từ .env (cho môi trường phát triển)
 require("dotenv").config();
 
-// Danh sách các secrets (in hoa, đồng bộ với .env)
 const secrets = [
   "MONGO_URI",
   "ACCESS_TOKEN_SECRET",
@@ -41,9 +59,12 @@ const secrets = [
   "END_TIME_OFFSET_MINUTES",
   "EMAIL_USER",
   "EMAIL_PASS",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+  "GOOGLE_CALLBACK_URL",
+  "SESSION_SECRET",
 ];
 
-// Ghi đè biến môi trường bằng giá trị từ secrets nếu tồn tại
 secrets.forEach((secret) => {
   const secretValue = readSecret(secret);
   if (secretValue) {
@@ -53,7 +74,6 @@ secrets.forEach((secret) => {
 
 app.use(express.static(path.join(__dirname, "public")));
 
-// Route để trả về index.html khi truy cập /
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
@@ -67,13 +87,16 @@ const itemOrdRouter = require("./routes/item_order.routes.js");
 const adminRouter = require("./routes/admin.routes.js");
 const voucherRouter = require("./routes/voucher.routes.js");
 
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Thêm middleware multer cho các route cần xử lý form-data
 app.use("/item", upload.none(), itemRouter);
-
 app.use("/users", userRoutes);
 app.use("/tables", tableRouter);
 app.use("/orders", orderRouter);

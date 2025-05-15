@@ -1,6 +1,6 @@
+// models/user.model.js
 const mongoose = require("mongoose");
 
-// Hàm loại bỏ dấu tiếng Việt và chuyển thành chữ thường
 function removeVietnameseAccents(str) {
   if (!str) return "";
   return str
@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     name: { type: String, default: "" },
-    nameNoAccents: { type: String, default: "" }, // Giá trị mặc định
+    nameNoAccents: { type: String, default: "" },
     role: {
       type: String,
       enum: ["ADMIN", "STAFF", "CUSTOMER"],
@@ -25,13 +25,13 @@ const userSchema = new mongoose.Schema(
     },
     address: { type: String, default: "" },
     avatar: { type: String, default: "" },
-    phone: { type: String, default: "" }, // Giá trị mặc định
+    phone: { type: String, default: "" },
     refresh_token: { type: String, default: null },
+    googleId: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }
 );
 
-// Middleware để tự động sinh nameNoAccents trước khi lưu
 userSchema.pre("save", function (next) {
   if (this.name) {
     this.nameNoAccents = removeVietnameseAccents(this.name);
@@ -39,7 +39,6 @@ userSchema.pre("save", function (next) {
   next();
 });
 
-// Middleware để tự động cập nhật nameNoAccents khi update
 userSchema.pre("findOneAndUpdate", function (next) {
   const update = this.getUpdate();
   if (update.name) {
