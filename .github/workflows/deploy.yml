@@ -11,16 +11,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
+      
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
+      
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -28,7 +28,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: arisdev2k2/backend-easydine:latest
-
+      
       - name: Deploy to Server
         uses: appleboy/ssh-action@master
         env:
@@ -54,15 +54,20 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           envs: PORT,MONGO_URI,ACCESS_TOKEN_SECRET,ACCESS_TOKEN_LIFE,REFRESH_TOKEN_SECRET,REFRESH_TOKEN_LIFE,REFRESH_TOKEN_SIZE,END_TIME_OFFSET_MINUTES,EMAIL_USER,EMAIL_PASS,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_CALLBACK_URL,SESSION_SECRET,VT_ENV,FE_URL
           script: |
+            # Update code from repository
+            cd ~/backend-easydine
+            git pull origin main
+            
+            # Create network if not exists
             if ! docker network ls | grep -q mongo_app-network; then
               docker network create mongo_app-network
             fi
-
-            cd ~/backend-easydine
+            
+            # Pull latest image
             docker pull arisdev2k2/backend-easydine:latest
             docker-compose down
-
-            # Chạy docker-compose với tất cả các biến môi trường
+            
+            # Run docker-compose with all environment variables
             PORT="${PORT}" \
             MONGO_URI="${MONGO_URI}" \
             ACCESS_TOKEN_SECRET="${ACCESS_TOKEN_SECRET}" \
@@ -80,6 +85,6 @@ jobs:
             VT_ENV="${VT_ENV}" \
             FE_URL="${FE_URL}" \
             docker-compose up -d
-
-            # Dọn dẹp các image cũ
+            
+            # Clean up old images
             docker image prune -f
