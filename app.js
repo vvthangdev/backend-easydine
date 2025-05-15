@@ -87,7 +87,8 @@ function kiemTraBienMoiTruong() {
     "GOOGLE_CLIENT_SECRET",
     "GOOGLE_CALLBACK_URL",
     "SESSION_SECRET",
-    "FE_URL", // Thêm FE_URL vào đây
+    "FE_URL",
+    "VT_ENV"
   ];
 
   console.log("=== KIỂM TRA BIẾN MÔI TRƯỜNG ===");
