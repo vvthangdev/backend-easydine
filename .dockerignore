@@ -6,7 +6,7 @@ npm-debug.log
 
 # Bí mật và cấu hình
 secrets/
-# .env
+.env
 
 # Git
 .git/

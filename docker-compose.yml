@@ -1,24 +1,102 @@
-version: '3.8'
+name: Deploy be-EasyDine Backend to Ubuntu Server
 
-services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      cache_from:
-        - backend-easydine_backend:latest
-    image: backend-easydine_backend:latest
-    container_name: backend
-    ports:
-      - "8080:8080"
-    environment:
-      - PORT=8080
-      - NODE_ENV=production
-    env_file:
-      - .env
-    networks:
-      - mongo_app-network
+on:
+  push:
+    branches:
+      - main
 
-networks:
-  mongo_app-network:
-    external: true
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: arisdev2k2/backend-easydine:latest
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        env:
+          PORT: ${{ secrets.PORT }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+          ACCESS_TOKEN_LIFE: ${{ secrets.ACCESS_TOKEN_LIFE }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          REFRESH_TOKEN_LIFE: ${{ secrets.REFRESH_TOKEN_LIFE }}
+          REFRESH_TOKEN_SIZE: ${{ secrets.REFRESH_TOKEN_SIZE }}
+          END_TIME_OFFSET_MINUTES: ${{ secrets.END_TIME_OFFSET_MINUTES }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_CALLBACK_URL: ${{ secrets.GOOGLE_CALLBACK_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            # Đảm bảo Docker và Docker Compose được cài đặt
+            if ! command -v docker &> /dev/null; then
+              sudo apt update
+              sudo apt install -y docker.io
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker ${{ secrets.SERVER_USER }}
+            fi
+            if ! command -v docker-compose &> /dev/null; then
+              sudo apt install -y docker-compose
+            fi
+
+            # Đăng nhập vào Docker Hub
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+            # Đảm bảo network mongo_app-network tồn tại
+            if ! docker network ls | grep -q mongo_app-network; then
+              docker network create mongo_app-network
+            fi
+
+            # Triển khai backend
+            cd /home/aris/backend-easydine
+            git pull origin main
+            docker-compose down
+            # Chạy docker-compose với các biến môi trường
+            PORT="$PORT" \
+            MONGO_URI="$MONGO_URI" \
+            ACCESS_TOKEN_SECRET="$ACCESS_TOKEN_SECRET" \
+            ACCESS_TOKEN_LIFE="$ACCESS_TOKEN_LIFE" \
+            REFRESH_TOKEN_SECRET="$REFRESH_TOKEN_SECRET" \
+            REFRESH_TOKEN_LIFE="$REFRESH_TOKEN_LIFE" \
+            REFRESH_TOKEN_SIZE="$REFRESH_TOKEN_SIZE" \
+            END_TIME_OFFSET_MINUTES="$END_TIME_OFFSET_MINUTES" \
+            EMAIL_USER="$EMAIL_USER" \
+            EMAIL_PASS="$EMAIL_PASS" \
+            GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID" \
+            GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET" \
+            GOOGLE_CALLBACK_URL="$GOOGLE_CALLBACK_URL" \
+            SESSION_SECRET="$SESSION_SECRET" \
+            docker-compose up -d
+            # Dọn dẹp image không dùng
+            docker image prune -f
+
+      - name: Check Server Health
+        run: |
+          sleep 30
+          curl -f https://vuvanthang.website || exit 1
