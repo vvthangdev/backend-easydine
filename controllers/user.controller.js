@@ -2,8 +2,8 @@ const User = require("../models/user.model.js");
 require("dotenv").config();
 const userService = require("../services/user.service");
 const authUtil = require("../utils/auth.util");
-const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
+const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
 const { Auth } = require("two-step-auth");
 
 const getAllUsers = async (req, res) => {
@@ -437,7 +437,8 @@ const getUserById = async (req, res) => {
 const updateUserByAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    const { email, password, username, name, phone, role, address, avatar } = req.body;
+    const { email, password, username, name, phone, role, address, avatar } =
+      req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -537,7 +538,9 @@ const googleLoginCallback = async (req, res) => {
       refreshToken = user.refresh_token;
     }
 
-    const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
+    const redirectUrl = `${
+      process.env.FE_URL || "http://localhost:3000"
+    }/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
       JSON.stringify({
         id: user._id,
         name: user.name,
@@ -552,7 +555,11 @@ const googleLoginCallback = async (req, res) => {
     return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Lỗi khi đăng nhập Google:", error);
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/login?error=google_login_failed`);
+    return res.redirect(
+      `${
+        process.env.FE_URL || "http://localhost:3000"
+      }/login?error=google_login_failed`
+    );
   }
 };
 

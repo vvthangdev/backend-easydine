@@ -73,25 +73,36 @@ const PORT = process.env.PORT || 8080;
 
 function kiemTraBienMoiTruong() {
   const bienBatBuoc = [
-    'PORT', 'MONGO_URI', 'ACCESS_TOKEN_SECRET', 'ACCESS_TOKEN_LIFE',
-    'REFRESH_TOKEN_SECRET', 'REFRESH_TOKEN_LIFE', 'REFRESH_TOKEN_SIZE',
-    'END_TIME_OFFSET_MINUTES', 'EMAIL_USER', 'EMAIL_PASS',
-    'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_CALLBACK_URL',
-    'SESSION_SECRET', 'FRONTEND_URL'  // Thêm FRONTEND_URL vào đây
+    "PORT",
+    "MONGO_URI",
+    "ACCESS_TOKEN_SECRET",
+    "ACCESS_TOKEN_LIFE",
+    "REFRESH_TOKEN_SECRET",
+    "REFRESH_TOKEN_LIFE",
+    "REFRESH_TOKEN_SIZE",
+    "END_TIME_OFFSET_MINUTES",
+    "EMAIL_USER",
+    "EMAIL_PASS",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_CALLBACK_URL",
+    "SESSION_SECRET",
+    "FE_URL", // Thêm FE_URL vào đây
   ];
-  
-  console.log('=== KIỂM TRA BIẾN MÔI TRƯỜNG ===');
+
+  console.log("=== KIỂM TRA BIẾN MÔI TRƯỜNG ===");
   for (const tenBien of bienBatBuoc) {
     if (process.env[tenBien]) {
-      const giaTriHienThi = process.env[tenBien].length > 5 
-        ? process.env[tenBien].substring(0, 3) + '...' 
-        : '[có giá trị]';
+      const giaTriHienThi =
+        process.env[tenBien].length > 5
+          ? process.env[tenBien].substring(0, 3) + "..."
+          : "[có giá trị]";
       console.log(`✅ ${tenBien}: ${giaTriHienThi}`);
     } else {
       console.log(`❌ ${tenBien}: THIẾU`);
     }
   }
-  console.log('================================');
+  console.log("================================");
 }
 
 // Gọi hàm kiểm tra
