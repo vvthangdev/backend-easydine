@@ -46,11 +46,12 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_CALLBACK_URL: ${{ secrets.GOOGLE_CALLBACK_URL }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: PORT,MONGO_URI,ACCESS_TOKEN_SECRET,ACCESS_TOKEN_LIFE,REFRESH_TOKEN_SECRET,REFRESH_TOKEN_LIFE,REFRESH_TOKEN_SIZE,END_TIME_OFFSET_MINUTES,EMAIL_USER,EMAIL_PASS,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_CALLBACK_URL,SESSION_SECRET
+          envs: PORT,MONGO_URI,ACCESS_TOKEN_SECRET,ACCESS_TOKEN_LIFE,REFRESH_TOKEN_SECRET,REFRESH_TOKEN_LIFE,REFRESH_TOKEN_SIZE,END_TIME_OFFSET_MINUTES,EMAIL_USER,EMAIL_PASS,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,GOOGLE_CALLBACK_URL,SESSION_SECRET,FRONTEND_URL
           script: |
             if ! docker network ls | grep -q mongo_app-network; then
               docker network create mongo_app-network
@@ -75,6 +76,7 @@ jobs:
             GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
             GOOGLE_CALLBACK_URL="${GOOGLE_CALLBACK_URL}" \
             SESSION_SECRET="${SESSION_SECRET}" \
+            FRONTEND_URL="${FRONTEND_URL}" \
             docker-compose up -d
 
             # Dọn dẹp các image cũ
