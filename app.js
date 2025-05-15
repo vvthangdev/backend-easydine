@@ -1,4 +1,3 @@
-// index.js
 const express = require("express");
 const cors = require("cors");
 const app = express();
@@ -8,15 +7,16 @@ const { createServer } = require("node:http");
 const server = createServer(app);
 const io = new Server(server);
 const multer = require("multer");
-const fs = require("fs");
 const session = require("express-session");
 const passport = require("passport");
-require("dotenv").config();
-console.log("SESSION_SECRET:", process.env.SESSION_SECRET);
 const upload = multer();
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
 // Cấu hình session
 app.use(
   session({
@@ -34,50 +34,22 @@ app.use(passport.session());
 // Load Google Strategy
 require("./config/passport")(passport);
 
-// Hàm đọc secret từ file
-const readSecret = (secretName) => {
-  try {
-    const secretPath = `/run/secrets/${secretName}`;
-    if (fs.existsSync(secretPath)) {
-      return fs.readFileSync(secretPath, "utf8").trim();
-    }
-  } catch (err) {
-    console.error(`Error reading secret ${secretName}:`, err);
-  }
-  return null;
-};
-
-require("dotenv").config();
-
-const secrets = [
-  "MONGO_URI",
-  "ACCESS_TOKEN_SECRET",
-  "ACCESS_TOKEN_LIFE",
-  "REFRESH_TOKEN_SECRET",
-  "REFRESH_TOKEN_LIFE",
-  "REFRESH_TOKEN_SIZE",
-  "END_TIME_OFFSET_MINUTES",
-  "EMAIL_USER",
-  "EMAIL_PASS",
-  "GOOGLE_CLIENT_ID",
-  "GOOGLE_CLIENT_SECRET",
-  "GOOGLE_CALLBACK_URL",
-  "SESSION_SECRET",
-];
-
-secrets.forEach((secret) => {
-  const secretValue = readSecret(secret);
-  if (secretValue) {
-    process.env[secret] = secretValue;
-  }
-});
-
+// Cung cấp file tĩnh
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// Cấu hình CORS
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
+
+// Routes
 const connectDB = require("./config/db.config.js");
 const userRoutes = require("./routes/user.routes");
 const tableRouter = require("./routes/table.routes.js");
@@ -87,15 +59,6 @@ const itemOrdRouter = require("./routes/item_order.routes.js");
 const adminRouter = require("./routes/admin.routes.js");
 const voucherRouter = require("./routes/voucher.routes.js");
 
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-  })
-);
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
 app.use("/item", upload.none(), itemRouter);
 app.use("/users", userRoutes);
 app.use("/tables", tableRouter);
@@ -104,6 +67,7 @@ app.use("/item-order", itemOrdRouter);
 app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
 
+// Khởi động server
 const PORT = process.env.PORT || 8080;
 
 connectDB()
