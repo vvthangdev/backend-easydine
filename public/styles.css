@@ -1,0 +1,177 @@
+/* Reset & base */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #f5f7fa;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue',
+    sans-serif;
+  color: #111;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  overflow-x: hidden;
+}
+
+/* Container */
+.profile-container {
+  background: #fff;
+  max-width: 900px;
+  width: 100%;
+  border-radius: 32px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+  margin: 40px auto;
+  padding: 48px 40px 40px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: morphIn 2.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  opacity: 0;
+  transform: scale(0.95) translateY(30px);
+  outline: none;
+}
+@keyframes morphIn {
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    border-radius: 32px;
+  }
+}
+
+.profile-row {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 40px;
+  justify-content: center;
+}
+
+.profile-avatar {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    border-radius 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.4s ease,
+    transform 0.4s ease;
+  will-change: transform, border-radius, box-shadow;
+}
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.6s ease;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+/* Hover và focus: ảnh nổi lên, giữ nguyên hình tròn, không méo viền */
+.profile-avatar:hover,
+.profile-avatar:focus-visible,
+.profile-avatar.focus-visible {
+  border-radius: 50%; /* giữ nguyên tròn */
+  box-shadow: 0 25px 50px rgba(33, 118, 255, 0.5);
+  transform: translateY(-10px) scale(1.05); /* nổi lên và phóng to nhẹ */
+  outline: none;
+}
+.profile-avatar:hover img,
+.profile-avatar:focus-visible img,
+.profile-avatar.focus-visible img {
+  transform: scale(1.1); /* chỉ phóng to */
+}
+
+.profile-info {
+  flex: 1;
+  min-width: 0;
+}
+.profile-name {
+  font-size: 2.8rem;
+  font-weight: 700;
+  margin: 0;
+}
+.profile-nickname {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #2176ff;
+  margin: 8px 0 20px 0;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.profile-description {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: #222;
+  margin-bottom: 0;
+}
+
+/* Social links - luôn ở giữa, tách biệt */
+.social-links {
+  margin-top: 48px;
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+.social-links a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 28px;
+  border-radius: 14px;
+  font-weight: 600;
+  font-size: 1.1rem;
+  background: #f5faff;
+  color: #2176ff;
+  box-shadow: 0 4px 18px rgba(33,118,255,0.08);
+  transition: background 0.25s, color 0.25s, transform 0.2s;
+  white-space: nowrap;
+  text-decoration: none;
+  user-select: none;
+}
+.social-links a i {
+  font-size: 1.25rem;
+}
+.social-links a:hover {
+  background: #2176ff;
+  color: #fff;
+  transform: translateY(-3px) scale(1.04);
+}
+
+/* Responsive */
+@media (max-width: 800px) {
+  .profile-row {
+    flex-direction: column;
+    gap: 24px;
+    align-items: center;
+    text-align: center;
+  }
+  .profile-avatar {
+    width: 120px;
+    height: 120px;
+  }
+  .profile-container {
+    padding: 32px 10px 32px 10px;
+  }
+  .social-links {
+    gap: 16px;
+    margin-top: 32px;
+  }
+  .social-links a {
+    padding: 10px 16px;
+    font-size: 1rem;
+  }
+}
