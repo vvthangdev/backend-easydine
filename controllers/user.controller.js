@@ -538,9 +538,12 @@ const googleLoginCallback = async (req, res) => {
       refreshToken = user.refresh_token;
     }
 
-    const redirectUrl = `${
-      process.env.FE_URL || "http://localhost:3000"
-    }/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
+    console.log("Google OAuth redirect:", {
+      username: user.username,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+    });
+
+    const redirectUrl = `${process.env.FRONTEND_URL}/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
       JSON.stringify({
         id: user._id,
         name: user.name,
@@ -552,14 +555,11 @@ const googleLoginCallback = async (req, res) => {
         phone: user.phone,
       })
     )}`;
+    console.log("Redirecting to:", redirectUrl);
     return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Lỗi khi đăng nhập Google:", error);
-    return res.redirect(
-      `${
-        process.env.FE_URL || "http://localhost:3000"
-      }/login?error=google_login_failed`
-    );
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_login_failed`);
   }
 };
 

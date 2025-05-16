@@ -22,7 +22,7 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL}
       - SESSION_SECRET=${SESSION_SECRET}
-      - FE_URL=${FE_URL}
+      - FRONTEND_URL=${FRONTEND_URL}
       - VT_ENV=${VT_ENV}
     networks:
       - mongo_app-network
