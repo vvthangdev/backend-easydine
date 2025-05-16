@@ -107,7 +107,7 @@ function kiemTraBienMoiTruong() {
 }
 
 // Gọi hàm kiểm tra
-kiemTraBienMoiTruong();
+// kiemTraBienMoiTruong();
 
 connectDB()
   .then(() => {
