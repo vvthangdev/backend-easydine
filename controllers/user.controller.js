@@ -538,11 +538,6 @@ const googleLoginCallback = async (req, res) => {
       refreshToken = user.refresh_token;
     }
 
-    console.log("Google OAuth redirect:", {
-      username: user.username,
-      FRONTEND_URL: process.env.FRONTEND_URL,
-    });
-
     const redirectUrl = `${process.env.FRONTEND_URL}/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
       JSON.stringify({
         id: user._id,
@@ -555,11 +550,49 @@ const googleLoginCallback = async (req, res) => {
         phone: user.phone,
       })
     )}`;
-    console.log("Redirecting to:", redirectUrl);
     return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Lỗi khi đăng nhập Google:", error);
     return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_login_failed`);
+  }
+};
+
+const handlePaymentReturn = async (req, res) => {
+  try {
+    const vnp_Params = req.query;
+    const vnp_SecureHash = vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHashType;
+
+    // Sắp xếp params để kiểm tra hash
+    const sortedParams = Object.keys(vnp_Params)
+      .sort()
+      .reduce((obj, key) => {
+        obj[key] = vnp_Params[key];
+        return obj;
+      }, {});
+    const signData = querystring.stringify(sortedParams);
+    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
+    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+
+    const order_id = vnp_Params.vnp_TxnRef;
+    const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
+
+    // Kiểm tra checksum
+    if (calculatedHash !== vnp_SecureHash) {
+      return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Invalid secure hash`);
+    }
+
+    // Kiểm tra trạng thái giao dịch
+    if (vnp_ResponseCode === "00") {
+      return res.redirect(`${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}`);
+    } else {
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/payment-failed?message=Transaction failed with code ${vnp_ResponseCode}`
+      );
+    }
+  } catch (error) {
+    return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Error processing payment`);
   }
 };
 
@@ -577,4 +610,5 @@ module.exports = {
   getUserById,
   updateUserByAdmin,
   googleLoginCallback,
+  handlePaymentReturn,
 };

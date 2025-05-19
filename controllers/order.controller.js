@@ -6,6 +6,9 @@ const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
+
+const crypto = require("crypto");
+const querystring = require("querystring");
 const mongoose = require('mongoose');
 
 const createOrder = async (req, res) => {
@@ -136,15 +139,20 @@ const createOrder = async (req, res) => {
 };
 
 const updateOrder = async (req, res) => {
-  const session = await mongoose.startSession();
+  const session = await mongoose.startSession({
+    defaultTransactionOptions: {
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+    },
+  });
   session.startTransaction();
   try {
     const { id, start_time, end_time, tables, items, ...otherFields } = req.body;
 
-    if (!id) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Order ID is required!",
+        message: "Valid order ID is required!",
         data: null,
       });
     }
@@ -158,19 +166,23 @@ const updateOrder = async (req, res) => {
       });
     }
 
-    if (order.customer_id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        status: "ERROR",
-        message: "You can only update your own orders!",
-        data: null,
-      });
-    }
-
     const updateData = { ...otherFields };
     if (start_time) updateData.time = new Date(start_time);
 
     if (order.status === 'pending' && otherFields.status === 'confirmed') {
+      if (!req.user._id) {
+        throw new Error("Staff ID is required to confirm order!");
+      }
       updateData.staff_id = req.user._id;
+    }
+
+    if (['completed', 'canceled'].includes(otherFields.status) && order.type === 'reservation') {
+      const currentTime = new Date();
+      await ReservedTable.updateMany(
+        { reservation_id: id },
+        { end_time: currentTime },
+        { session }
+      );
     }
 
     const updatedOrder = await orderService.updateOrder(id, updateData, { session });
@@ -268,11 +280,37 @@ const updateOrder = async (req, res) => {
 
     await session.commitTransaction();
 
-    return res.status(200).json({
+    const response = {
       status: "SUCCESS",
       message: "Order updated successfully!",
       data: updatedOrder,
-    });
+    };
+
+    if (otherFields.status) {
+      setImmediate(async () => {
+        try {
+          const { io, adminSockets } = require('../app');
+          const notification = {
+            orderId: updatedOrder._id.toString(),
+            customerId: updatedOrder.customer_id.toString(),
+            type: updatedOrder.type,
+            status: updatedOrder.status,
+            staffId: updatedOrder.staff_id?.toString() || null,
+            time: updatedOrder.time.toISOString(),
+            createdAt: new Date().toISOString(),
+            message: `Order ${updatedOrder._id} updated to status ${updatedOrder.status}`,
+          };
+
+          adminSockets.forEach((socket) => {
+            socket.emit('orderStatusUpdate', notification);
+          });
+        } catch (error) {
+          console.error('Error sending notification:', error.message);
+        }
+      });
+    }
+
+    return res.status(200).json(response);
   } catch (error) {
     await session.abortTransaction();
     return res.status(500).json({
@@ -417,7 +455,7 @@ const getOrderInfo = async (req, res) => {
 
 const getAllOrders = async (req, res) => {
   try {
-    const orderDetail = await OrderDetail.find({ customer_id: req.user._id });
+    const orderDetail = await OrderDetail.find({});
 
     return res.status(200).json({
       status: "SUCCESS",
@@ -571,65 +609,6 @@ const deleteOrder = async (req, res) => {
     });
   } finally {
     session.endSession();
-  }
-};
-
-const confirmOrder = async (req, res) => {
-  try {
-    const { order_id } = req.body;
-    const user = req.user;
-
-    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Valid order_id is required!",
-        data: null,
-      });
-    }
-
-    const order = await OrderDetail.findById(order_id);
-    if (!order) {
-      return res.status(404).json({
-        status: "ERROR",
-        message: "Order not found!",
-        data: null,
-      });
-    }
-
-    if (order.status !== 'pending') {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Only pending orders can be confirmed!",
-        data: null,
-      });
-    }
-
-    order.status = 'confirmed';
-    order.staff_id = user._id;
-    await order.save();
-
-    return res.status(200).json({
-      status: "SUCCESS",
-      message: "Xác nhận đơn hàng thành công",
-      data: {
-        order: {
-          _id: order._id,
-          customer_id: order.customer_id,
-          staff_id: order.staff_id,
-          time: order.time,
-          type: order.type,
-          status: order.status,
-          star: order.star,
-          comment: order.comment,
-        },
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({
-      status: "ERROR",
-      message: "An error occurred while confirming the order!",
-      data: null,
-    });
   }
 };
 
@@ -971,6 +950,250 @@ const mergeOrder = async (req, res) => {
   }
 };
 
+
+const createPayment = async (req, res) => {
+  try {
+    const { order_id, amount, order_desc, bank_code, language, txtexpire } = req.body;
+
+    // Kiểm tra đầu vào
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Valid order_id is required!",
+        data: null,
+      });
+    }
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Valid amount is required!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await OrderDetail.findById(order_id);
+    if (!order) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Order not found!",
+        data: null,
+      });
+    }
+    if (order.status !== "confirmed") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Only confirmed orders can proceed to payment!",
+        data: null,
+      });
+    }
+
+    // Cấu hình VNPay
+    const vnp_Url = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+    const vnp_TmnCode = process.env.VNPAY_TMN_CODE;
+    const vnp_HashSecret = process.env.VNPAY_HASH_SECRET;
+    const vnp_ReturnUrl = process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
+    const vnp_CreateDate = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+    const vnp_TxnRef = order_id; // Sử dụng order_id làm mã giao dịch
+    const vnp_Amount = amount * 100; // Nhân 100 theo yêu cầu VNPay
+    const vnp_IpAddr = req.ip || "127.0.0.1";
+    const vnp_Locale = language || "vn";
+    const vnp_CurrCode = "VND";
+    const vnp_OrderInfo = order_desc || `Thanh toan don hang ${order_id}`;
+    const vnp_OrderType = "other"; // Có thể cấu hình theo danh mục hàng hóa
+    const vnp_ExpireDate = txtexpire || new Date(Date.now() + 15 * 60 * 1000).toISOString().replace(/[-:T.]/g, "").slice(0, 14); // Hết hạn sau 15 phút
+
+    // Tạo params
+    const params = {
+      vnp_Version: "2.1.0",
+      vnp_Command: "pay",
+      vnp_TmnCode,
+      vnp_Amount,
+      vnp_CurrCode,
+      vnp_TxnRef,
+      vnp_OrderInfo,
+      vnp_OrderType,
+      vnp_Locale,
+      vnp_ReturnUrl,
+      vnp_IpAddr,
+      vnp_CreateDate,
+      vnp_ExpireDate,
+    };
+
+    if (bank_code) {
+      params.vnp_BankCode = bank_code;
+    }
+
+    // Sắp xếp params theo thứ tự alphabet
+    const sortedParams = Object.keys(params)
+      .sort()
+      .reduce((obj, key) => {
+        obj[key] = params[key];
+        return obj;
+      }, {});
+
+    // Tạo chuỗi hash
+    const signData = querystring.stringify(sortedParams);
+    const hmac = crypto.createHmac("sha512", vnp_HashSecret);
+    const vnp_SecureHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+
+    // Thêm secure hash vào params
+    sortedParams.vnp_SecureHash = vnp_SecureHash;
+
+    // Tạo URL thanh toán
+    const vnpUrl = `${vnp_Url}?${querystring.stringify(sortedParams)}`;
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Payment URL created successfully!",
+      data: { vnpUrl },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "An error occurred while creating payment URL!",
+      data: null,
+    });
+  }
+};
+
+const handlePaymentReturn = async (req, res) => {
+  try {
+    const vnp_Params = req.query;
+    const vnp_SecureHash = vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHashType;
+
+    // Sắp xếp params để kiểm tra hash
+    const sortedParams = Object.keys(vnp_Params)
+      .sort()
+      .reduce((obj, key) => {
+        obj[key] = vnp_Params[key];
+        return obj;
+      }, {});
+    const signData = querystring.stringify(sortedParams);
+    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
+    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+
+    const order_id = vnp_Params.vnp_TxnRef;
+    const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
+
+    // Kiểm tra checksum
+    if (calculatedHash !== vnp_SecureHash) {
+      return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Invalid secure hash`);
+    }
+
+    // Kiểm tra trạng thái giao dịch
+    if (vnp_ResponseCode === "00") {
+      return res.redirect(`${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}`);
+    } else {
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/payment-failed?message=Transaction failed with code ${vnp_ResponseCode}`
+      );
+    }
+  } catch (error) {
+    return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Error processing payment`);
+  }
+};
+
+const handlePaymentIPN = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const vnp_Params = req.query;
+    const vnp_SecureHash = vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHashType;
+
+    // Sắp xếp params để kiểm tra hash
+    const sortedParams = Object.keys(vnp_Params)
+      .sort()
+      .reduce((obj, key) => {
+        obj[key] = vnp_Params[key];
+        return obj;
+      }, {});
+    const signData = querystring.stringify(sortedParams);
+    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
+    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+
+    const order_id = vnp_Params.vnp_TxnRef;
+    const vnp_Amount = parseInt(vnp_Params.vnp_Amount) / 100; // Chia 100 để lấy số tiền gốc
+    const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
+    const vnp_TransactionStatus = vnp_Params.vnp_TransactionStatus;
+    const vnp_TransactionNo = vnp_Params.vnp_TransactionNo;
+
+    // Kiểm tra checksum
+    if (calculatedHash !== vnp_SecureHash) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.json({ RspCode: "97", Message: "Invalid signature" });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await OrderDetail.findById(order_id).session(session);
+    if (!order) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.json({ RspCode: "01", Message: "Order not found" });
+    }
+
+    // Kiểm tra số tiền
+    const orderItems = await ItemOrder.find({ order_id: order._id }).session(session);
+    const items = await Item.find({ _id: { $in: orderItems.map((i) => i.item_id) } }).session(session);
+    const itemMap = new Map(items.map((item) => [item._id.toString(), item]));
+    let totalAmount = 0;
+    for (const itemOrder of orderItems) {
+      const item = itemMap.get(itemOrder.item_id.toString());
+      const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find((s) => s.name === itemOrder.size) : null;
+      totalAmount += (sizeInfo ? sizeInfo.price : item.price) * itemOrder.quantity;
+    }
+    if (totalAmount !== vnp_Amount) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.json({ RspCode: "04", Message: "Invalid amount" });
+    }
+
+    // Kiểm tra trạng thái đơn hàng
+    if (order.status === "completed") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.json({ RspCode: "02", Message: "Order already confirmed" });
+    }
+
+    // Cập nhật trạng thái đơn hàng
+    if (vnp_ResponseCode === "00" && vnp_TransactionStatus === "00") {
+      order.status = "completed";
+      order.transaction_id = vnp_TransactionNo; // Lưu mã giao dịch
+      await order.save({ session });
+
+      // Gửi email xác nhận (bất đồng bộ)
+      setImmediate(async () => {
+        try {
+          const user = await getUserByUserId(order.customer_id);
+          await emailService.sendOrderConfirmationEmail(user.email, user.name, {
+            ...order.toObject(),
+            transactionNo: vnp_TransactionNo,
+          });
+        } catch (emailError) {
+          console.error("Error sending email:", emailError.message);
+        }
+      });
+    } else {
+      // Giao dịch thất bại
+      await session.abortTransaction();
+      session.endSession();
+      return res.json({ RspCode: "00", Message: "Confirm Success" }); // Vẫn trả về 00 để VNPay không retry
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+    return res.json({ RspCode: "00", Message: "Confirm Success" });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    return res.json({ RspCode: "99", Message: "Unknown error" });
+  }
+};
 module.exports = {
   getAllOrders,
   getAllOrdersInfo,
@@ -980,7 +1203,9 @@ module.exports = {
   getUserOrders,
   searchOrdersByCustomerId,
   deleteOrder,
-  confirmOrder,
   splitOrder,
   mergeOrder,
+  createPayment,
+  handlePaymentReturn,
+  handlePaymentIPN,
 };

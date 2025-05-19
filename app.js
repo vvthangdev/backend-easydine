@@ -5,7 +5,13 @@ const path = require("path");
 const { Server } = require("socket.io");
 const { createServer } = require("node:http");
 const server = createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: true, // Cho phép frontend
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
 const multer = require("multer");
 const session = require("express-session");
 const passport = require("passport");
@@ -17,6 +23,14 @@ app.use(express.json());
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
+
+// Cấu hình CORS
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
 
 // Cấu hình session
 app.use(
@@ -42,13 +56,40 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Cấu hình CORS
-app.use(
-  cors({
-    origin: true,
-    credentials: true,
-  })
-);
+
+
+// Socket.IO: Quản lý kết nối admin
+const adminSockets = new Map();
+
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+      return next(new Error("Authentication error: No token provided"));
+    }
+
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+    const user = await User.findById(decoded.userId).lean();
+    if (!user || user.role !== "admin") {
+      return next(new Error("Authentication error: Admin role required"));
+    }
+
+    socket.user = user;
+    next();
+  } catch (error) {
+    next(new Error("Authentication error: " + error.message));
+  }
+});
+
+io.on("connection", (socket) => {
+  console.log(`Admin connected: ${socket.user._id}`);
+  adminSockets.set(socket.user._id.toString(), socket);
+
+  socket.on("disconnect", () => {
+    console.log(`Admin disconnected: ${socket.user._id}`);
+    adminSockets.delete(socket.user._id.toString());
+  });
+});
 
 // Routes
 const connectDB = require("./config/db.config.js");
@@ -71,40 +112,40 @@ app.use("/vouchers", voucherRouter);
 // Khởi động server
 const PORT = process.env.PORT || 8080;
 
-function kiemTraBienMoiTruong() {
-  const bienBatBuoc = [
-    "PORT",
-    "MONGO_URI",
-    "ACCESS_TOKEN_SECRET",
-    "ACCESS_TOKEN_LIFE",
-    "REFRESH_TOKEN_SECRET",
-    "REFRESH_TOKEN_LIFE",
-    "REFRESH_TOKEN_SIZE",
-    "END_TIME_OFFSET_MINUTES",
-    "EMAIL_USER",
-    "EMAIL_PASS",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
-    "GOOGLE_CALLBACK_URL",
-    "SESSION_SECRET",
-    "FRONTEND_URL",
-    "VT_ENV",
-  ];
+// function kiemTraBienMoiTruong() {
+//   const bienBatBuoc = [
+//     "PORT",
+//     "MONGO_URI",
+//     "ACCESS_TOKEN_SECRET",
+//     "ACCESS_TOKEN_LIFE",
+//     "REFRESH_TOKEN_SECRET",
+//     "REFRESH_TOKEN_LIFE",
+//     "REFRESH_TOKEN_SIZE",
+//     "END_TIME_OFFSET_MINUTES",
+//     "EMAIL_USER",
+//     "EMAIL_PASS",
+//     "GOOGLE_CLIENT_ID",
+//     "GOOGLE_CLIENT_SECRET",
+//     "GOOGLE_CALLBACK_URL",
+//     "SESSION_SECRET",
+//     "FRONTEND_URL",
+//     "VT_ENV",
+//   ];
 
-  console.log("=== KIỂM TRA BIẾN MÔI TRƯỜNG ===");
-  for (const tenBien of bienBatBuoc) {
-    if (process.env[tenBien]) {
-      const giaTriHienThi =
-        process.env[tenBien].length > 5
-          ? process.env[tenBien].substring(0, 3) + "..."
-          : "[có giá trị]";
-      console.log(`✅ ${tenBien}: ${giaTriHienThi}`);
-    } else {
-      console.log(`❌ ${tenBien}: THIẾU`);
-    }
-  }
-  console.log("================================");
-}
+//   console.log("=== KIỂM TRA BIẾN MÔI TRƯỜNG ===");
+//   for (const tenBien of bienBatBuoc) {
+//     if (process.env[tenBien]) {
+//       const giaTriHienThi =
+//         process.env[tenBien].length > 5
+//           ? process.env[tenBien].substring(0, 3) + "..."
+//           : "[có giá trị]";
+//       console.log(`✅ ${tenBien}: ${giaTriHienThi}`);
+//     } else {
+//       console.log(`❌ ${tenBien}: THIẾU`);
+//     }
+//   }
+//   console.log("================================");
+// }
 
 // Gọi hàm kiểm tra
 // kiemTraBienMoiTruong();
@@ -118,3 +159,5 @@ connectDB()
   .catch((err) => {
     console.error("Unable to connect to the database:", err);
   });
+
+  module.exports = { app, server, io, adminSockets };
