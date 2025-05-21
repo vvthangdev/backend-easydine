@@ -1,82 +1,42 @@
 const express = require("express");
 const cors = require("cors");
-const app = express();
 const path = require("path");
-const { Server } = require("socket.io");
 const { createServer } = require("node:http");
-const server = createServer(app);
-const jwt = require("jsonwebtoken");
-const User = require("./models/user.model.js");
-const authUtil = require("./utils/auth.util.js")
-
 const multer = require("multer");
 const session = require("express-session");
 const passport = require("passport");
+const socketModule = require("./socket/index.js");
+
+// Khởi tạo Express app và HTTP server
+const app = express();
+const server = createServer(app);
 const upload = multer();
 
+// Cấu hình middleware cơ bản
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+// Tải biến môi trường
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
 
 app.use(
   cors({
-    origin: true,
+    origin: process.env.FRONTEND_URL || true,
     credentials: true,
   })
 );
+// Cấu hình CORS
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || true,
+  methods: ["GET", "POST"],
+};
 
-const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL,
-    methods: ["GET", "POST"],
-  },
-});
+// Khởi tạo Socket.IO
+socketModule.init(server, { cors: corsOptions });
 
-io.use(async (socket, next) => {
-  try {
-    const token = socket.handshake.auth.token?.split(' ')[1];
-    if (!token) {
-      return next(new Error('Access token là bắt buộc!'));
-    }
-
-    const decoded = await authUtil.verifyToken(token, process.env.ACCESS_TOKEN_SECRET);
-    socket.user = decoded.payload;
-    next();
-  } catch (error) {
-    console.error('Lỗi xác thực socket:', error);
-    next(new Error('Token không hợp lệ!'));
-  }
-});
-
-const adminSockets = new Map();
-
-io.on('connection', (socket) => {
-  console.log(`User ${socket.user.username} đã kết nối, socket ID: ${socket.id}`);
-
-  if (socket.user.role === 'ADMIN') {
-    adminSockets.set(socket.user._id, socket);
-    socket.join('adminRoom');
-    console.log(`Admin ${socket.user.username} joined adminRoom, current adminSockets:`, Array.from(adminSockets.keys()));
-  }
-
-  socket.on('joinAdminRoom', (data) => {
-    if (socket.user.role === 'ADMIN') {
-      socket.join(data.room);
-      console.log(`User ${socket.user.username} joined ${data.room}`);
-    }
-  });
-
-  socket.on('disconnect', () => {
-    console.log(`User ${socket.user.username} đã ngắt kết nối`);
-    if (socket.user.role === 'ADMIN') {
-      adminSockets.delete(socket.user._id);
-    }
-  });
-});
-
+// Cấu hình session
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -86,19 +46,24 @@ app.use(
   })
 );
 
+// Cấu hình Passport
 app.use(passport.initialize());
 app.use(passport.session());
-
 require("./config/passport")(passport);
 
+// Serve static files
 app.use(express.static(path.join(__dirname, "public")));
 
+// Routes cơ bản
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
+// API thông tin về admin sockets
 app.get("/api/admin-sockets", (req, res) => {
+  const adminSockets = socketModule.getAdminSockets();
   const connectedAdmins = Array.from(adminSockets.keys());
+  
   res.json({
     status: "SUCCESS",
     message: "List of connected admin sockets",
@@ -109,29 +74,39 @@ app.get("/api/admin-sockets", (req, res) => {
   });
 });
 
+// API test thông báo đơn hàng mới
 app.post("/api/test-new-order", (req, res) => {
-  const notification = {
-    orderId: "test123",
-    customerId: "test789",
-    type: "reservation",
-    status: "pending",
-    staffId: null,
-    time: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    message: "Test new order notification",
-  };
+  try {
+    const io = socketModule.getIO();
+    const notification = {
+      orderId: "test123",
+      customerId: "test789",
+      type: "reservation",
+      status: "pending",
+      staffId: null,
+      time: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      message: "Test new order notification",
+    };
 
-  // console.log("Sending newOrder notification to adminRoom:", notification);
-  // console.log("Current adminRoom sockets:", io.sockets.adapter.rooms.get('adminRoom')?.size || 0);
-  io.to('adminRoom').emit("newOrder", notification);
+    console.log("Sending newOrder notification to adminRoom:", notification);
+    console.log("Current adminRoom sockets:", io.sockets.adapter.rooms.get('adminRoom')?.size || 0);
+    io.to('adminRoom').emit("newOrder", notification);
 
-  res.json({
-    status: "SUCCESS",
-    message: "Test newOrder notification sent",
-    data: notification,
-  });
+    res.json({
+      status: "SUCCESS",
+      message: "Test newOrder notification sent",
+      data: notification,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "ERROR", 
+      message: error.message
+    });
+  }
 });
 
+// Import routes
 const connectDB = require("./config/db.config.js");
 const userRoutes = require("./routes/user.routes.js");
 const tableRouter = require("./routes/table.routes.js");
@@ -141,6 +116,7 @@ const itemOrdRouter = require("./routes/item_order.routes.js");
 const adminRouter = require("./routes/admin.routes.js");
 const voucherRouter = require("./routes/voucher.routes.js");
 
+// Đăng ký routes
 app.use("/item", upload.none(), itemRouter);
 app.use("/users", userRoutes);
 app.use("/tables", tableRouter);
@@ -149,6 +125,7 @@ app.use("/item-order", itemOrdRouter);
 app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
 
+// Khởi động server
 const PORT = process.env.PORT || 8080;
 
 connectDB()
@@ -161,4 +138,4 @@ connectDB()
     console.error("Unable to connect to the database:", err);
   });
 
-module.exports = { app, server, io, adminSockets };
+module.exports = { app, server };

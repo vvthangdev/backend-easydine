@@ -6,7 +6,8 @@ const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
-const {io} = require("../app")
+const { getIO } = require("../socket"); // Import io từ app.js
+const socketOrderService = require("../socket/services/order");
 
 const crypto = require("crypto");
 const querystring = require("querystring");
@@ -119,18 +120,7 @@ const createOrder = async (req, res) => {
 
     // Gửi thông báo Socket.IO đến admin
     setImmediate(() => {
-      const notification = {
-        orderId: newOrder._id.toString(),
-        customerId: newOrder.customer_id.toString(),
-        type: newOrder.type,
-        status: newOrder.status,
-        staffId: newOrder.staff_id?.toString() || null,
-        time: newOrder.time.toISOString(),
-        createdAt: new Date().toISOString(),
-        message: `New order ${newOrder._id} created by ${req.user.username}`,
-      };
-
-      io.to('adminRoom').emit('newOrder', notification);
+      socketOrderService.notifyNewOrder(newOrder, req.user);
     });
 
     // Gửi email xác nhận
@@ -155,7 +145,6 @@ const createOrder = async (req, res) => {
     session.endSession();
   }
 };
-
 
 const updateOrder = async (req, res) => {
   const session = await mongoose.startSession({
