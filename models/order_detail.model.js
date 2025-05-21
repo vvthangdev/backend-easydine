@@ -1,3 +1,4 @@
+// models/orderDetail.model.js
 const mongoose = require('mongoose');
 
 const orderDetailSchema = new mongoose.Schema({
@@ -12,12 +13,13 @@ const orderDetailSchema = new mongoose.Schema({
   },
   star: { type: Number },
   comment: { type: String, maxLength: 255 },
-  transaction_id: { type: String, default: null }, // Thêm để lưu vnp_TransactionNo
+  transaction_id: { type: String, default: null },
   payment_status: {
     type: String,
     enum: ["pending", "success", "failed"],
     default: "pending",
   },
+  voucher_id: { type: mongoose.Schema.Types.ObjectId, ref: "Voucher", default: null }, // Thêm trường này
 }, { timestamps: false });
 
 module.exports = mongoose.model("OrderDetail", orderDetailSchema);

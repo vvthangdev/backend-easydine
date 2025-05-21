@@ -22,6 +22,13 @@ router.post("/sendOTP", userController.sendOTP);
 router.get("/all", authMiddleware.authenticateToken, userController.getAllUsers);
 router.get("/search", authMiddleware.authenticateToken, userController.searchUsers);
 
+
+// Khóa người dùng
+router.patch('/:id/deactivate', authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, userController.deactivateUser);
+
+// Mở khóa người dùng
+router.patch('/:id/activate', authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, userController.activateUser);
+
 router.get("/:id", authMiddleware.authenticateToken, userController.getUserById);
 
 router.patch(

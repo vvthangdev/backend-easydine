@@ -608,6 +608,70 @@ const handlePaymentReturn = async (req, res) => {
   }
 };
 
+const deactivateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findByIdAndUpdate(
+      id,
+      { isActive: false },
+      { new: true }
+    );
+    if (!user) {
+      return res.status(404).json({
+        status: 'ERROR',
+        message: 'Không tìm thấy người dùng!',
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      status: 'SUCCESS',
+      message: 'Khóa tài khoản thành công!',
+      data: user,
+    });
+  } catch (error) {
+    console.error('Lỗi khi khóa tài khoản:', error);
+    return res.status(500).json({
+      status: 'ERROR',
+      message: error.message || 'Đã xảy ra lỗi khi khóa tài khoản!',
+      data: null,
+    });
+  }
+};
+
+const activateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findByIdAndUpdate(
+      id,
+      { isActive: true },
+      { new: true }
+    );
+    if (!user) {
+      return res.status(404).json({
+        status: 'ERROR',
+        message: 'Không tìm thấy người dùng!',
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      status: 'SUCCESS',
+      message: 'Mở khóa tài khoản thành công!',
+      data: user,
+    });
+  } catch (error) {
+    console.error('Lỗi khi mở khóa tài khoản:', error);
+    return res.status(500).json({
+      status: 'ERROR',
+      message: error.message || 'Đã xảy ra lỗi khi mở khóa tài khoản!',
+      data: null,
+    });
+  }
+};
+
 module.exports = {
   getAllUsers,
   userInfo,
@@ -623,4 +687,6 @@ module.exports = {
   updateUserByAdmin,
   googleLoginCallback,
   handlePaymentReturn,
+  deactivateUser,
+  activateUser,
 };

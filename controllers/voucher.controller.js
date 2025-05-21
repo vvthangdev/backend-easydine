@@ -1,23 +1,5 @@
 const voucherService = require("../services/voucher.service");
-
-const getAllVouchers = async (req, res) => {
-  try {
-    const vouchers = await voucherService.getAllVouchers();
-
-    return res.status(200).json({
-      status: "SUCCESS",
-      message: "Lấy danh sách voucher thành công!",
-      data: vouchers,
-    });
-  } catch (error) {
-    console.error("Lỗi khi lấy danh sách voucher:", error);
-    return res.status(500).json({
-      status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi lấy danh sách voucher!",
-      data: null,
-    });
-  }
-};
+const mongoose = require('mongoose');
 
 const createVoucher = async (req, res) => {
   try {
@@ -50,7 +32,7 @@ const createVoucher = async (req, res) => {
 
 const getVoucher = async (req, res) => {
   try {
-    const { code } = req.query;
+    const { code } = req.params;
 
     if (!code) {
       return res.status(400).json({
@@ -203,10 +185,9 @@ const deleteVoucher = async (req, res) => {
 
 const addUsersToVoucher = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { userIds } = req.body;
+    const { voucherId, userIds } = req.body;
 
-    if (!id) {
+    if (!voucherId) {
       return res.status(400).json({
         status: "ERROR",
         message: "ID voucher là bắt buộc!",
@@ -222,7 +203,27 @@ const addUsersToVoucher = async (req, res) => {
       });
     }
 
-    const updatedVoucher = await voucherService.addUsersToVoucher(id, userIds);
+    // Kiểm tra voucherId hợp lệ
+    if (!mongoose.isValidObjectId(voucherId)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "ID voucher không hợp lệ!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra userIds hợp lệ
+    for (const userId of userIds) {
+      if (!mongoose.isValidObjectId(userId)) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: `ID người dùng không hợp lệ: ${userId}`,
+          data: null,
+        });
+      }
+    }
+
+    const updatedVoucher = await voucherService.addUsersToVoucher(voucherId, userIds);
     if (!updatedVoucher) {
       return res.status(404).json({
         status: "ERROR",
@@ -248,10 +249,9 @@ const addUsersToVoucher = async (req, res) => {
 
 const removeUsersFromVoucher = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { userIds } = req.body;
+    const { voucherId, userIds } = req.body;
 
-    if (!id) {
+    if (!voucherId) {
       return res.status(400).json({
         status: "ERROR",
         message: "ID voucher là bắt buộc!",
@@ -267,7 +267,27 @@ const removeUsersFromVoucher = async (req, res) => {
       });
     }
 
-    const updatedVoucher = await voucherService.removeUsersFromVoucher(id, userIds);
+    // Kiểm tra voucherId hợp lệ
+    if (!mongoose.isValidObjectId(voucherId)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "ID voucher không hợp lệ!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra userIds hợp lệ
+    for (const userId of userIds) {
+      if (!mongoose.isValidObjectId(userId)) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: `ID người dùng không hợp lệ: ${userId}`,
+          data: null,
+        });
+      }
+    }
+
+    const updatedVoucher = await voucherService.removeUsersFromVoucher(voucherId, userIds);
     if (!updatedVoucher) {
       return res.status(404).json({
         status: "ERROR",
@@ -291,6 +311,55 @@ const removeUsersFromVoucher = async (req, res) => {
   }
 };
 
+const applyVoucherToOrder = async (req, res) => {
+  try {
+    const { voucherCode, orderId } = req.body;
+    const customerId = req.user._id; // Lấy từ middleware authenticateToken
+    const userRole = req.user.role; // Lấy role từ middleware
+
+    if (!voucherCode || !orderId) {
+      return res.status(400).json({
+        status: 'ERROR',
+        message: 'Thiếu voucherCode hoặc orderId',
+        data: null,
+      });
+    }
+
+    const result = await voucherService.applyVoucher(orderId, voucherCode, customerId, userRole);
+
+    return res.status(200).json({
+      status: 'SUCCESS',
+      message: 'Áp dụng voucher thành công',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Lỗi khi áp dụng voucher:', error);
+    return res.status(400).json({
+      status: 'ERROR',
+      message: error.message || 'Đã xảy ra lỗi khi áp dụng voucher',
+      data: null,
+    });
+  }
+};
+
+const getAllVouchers = async (req, res) => {
+  try {
+    const vouchers = await voucherService.getAllVouchers();
+    return res.status(200).json({
+      status: 'SUCCESS',
+      message: 'Lấy danh sách voucher thành công!',
+      data: vouchers,
+    });
+  } catch (error) {
+    console.error('Lỗi khi lấy danh sách voucher:', error);
+    return res.status(500).json({
+      status: 'ERROR',
+      message: error.message || 'Đã xảy ra lỗi khi lấy danh sách voucher!',
+      data: null,
+    });
+  }
+};
+
 module.exports = {
   getAllVouchers,
   createVoucher,
@@ -300,4 +369,5 @@ module.exports = {
   deleteVoucher,
   addUsersToVoucher,
   removeUsersFromVoucher,
+  applyVoucherToOrder,
 };

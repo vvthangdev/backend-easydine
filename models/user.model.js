@@ -1,4 +1,3 @@
-// models/user.model.js
 const mongoose = require("mongoose");
 
 function removeVietnameseAccents(str) {
@@ -28,6 +27,7 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, default: "" },
     refresh_token: { type: String, default: null },
     googleId: { type: String, unique: true, sparse: true },
+    isActive: { type: Boolean, default: true }, // Thêm trường isActive
   },
   { timestamps: true }
 );
