@@ -24,9 +24,14 @@ services:
       - SESSION_SECRET=${SESSION_SECRET}
       - FRONTEND_URL=${FRONTEND_URL}
       - VT_ENV=${VT_ENV}
+      - VNPAY_TMN_CODE=${VNPAY_TMN_CODE}
+      - VNPAY_HASH_SECRET=${VNPAY_HASH_SECRET}
+      - VNPAY_RETURN_URL=${VNPAY_RETURN_URL}
+      - VNPAY_IPN_URL=${VNPAY_IPN_URL}
+      
     networks:
-      - mongo_app-network
+      - easydine-network
 
 networks:
-  mongo_app-network:
+  easydine-network:
     external: true

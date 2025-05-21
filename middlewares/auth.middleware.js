@@ -15,12 +15,16 @@ async function authenticateToken(req, res, next) {
   }
 
   try {
-    const user = await authUtil.verifyToken(token, process.env.ACCESS_TOKEN_SECRET);
-    if (!user) {
+    const decoded = await authUtil.verifyToken(token, process.env.ACCESS_TOKEN_SECRET);
+    if (!decoded) {
       return res.status(403).send("Invalid or expired access token!");
     }
 
-    const userObject = await User.findOne({ username: user.payload.username });
+    const userObject = await User.findOne({ username: decoded.payload.username });
+    if (!userObject || userObject._id.toString() !== decoded.payload._id) {
+      return res.status(403).send("Invalid user ID in token!");
+    }
+
     req.user = userObject;
     next();
   } catch (error) {

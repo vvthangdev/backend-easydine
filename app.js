@@ -5,13 +5,10 @@ const path = require("path");
 const { Server } = require("socket.io");
 const { createServer } = require("node:http");
 const server = createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: true, // Cho phép frontend
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-});
+const jwt = require("jsonwebtoken");
+const User = require("./models/user.model.js");
+const authUtil = require("./utils/auth.util.js")
+
 const multer = require("multer");
 const session = require("express-session");
 const passport = require("passport");
@@ -19,12 +16,11 @@ const upload = multer();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-//v2
+
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
 
-// Cấu hình CORS
 app.use(
   cors({
     origin: true,
@@ -32,68 +28,112 @@ app.use(
   })
 );
 
-// Cấu hình session
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL,
+    methods: ["GET", "POST"],
+  },
+});
+
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token?.split(' ')[1];
+    if (!token) {
+      return next(new Error('Access token là bắt buộc!'));
+    }
+
+    const decoded = await authUtil.verifyToken(token, process.env.ACCESS_TOKEN_SECRET);
+    socket.user = decoded.payload;
+    next();
+  } catch (error) {
+    console.error('Lỗi xác thực socket:', error);
+    next(new Error('Token không hợp lệ!'));
+  }
+});
+
+const adminSockets = new Map();
+
+io.on('connection', (socket) => {
+  console.log(`User ${socket.user.username} đã kết nối, socket ID: ${socket.id}`);
+
+  if (socket.user.role === 'ADMIN') {
+    adminSockets.set(socket.user._id, socket);
+    socket.join('adminRoom');
+    console.log(`Admin ${socket.user.username} joined adminRoom, current adminSockets:`, Array.from(adminSockets.keys()));
+  }
+
+  socket.on('joinAdminRoom', (data) => {
+    if (socket.user.role === 'ADMIN') {
+      socket.join(data.room);
+      console.log(`User ${socket.user.username} joined ${data.room}`);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`User ${socket.user.username} đã ngắt kết nối`);
+    if (socket.user.role === 'ADMIN') {
+      adminSockets.delete(socket.user._id);
+    }
+  });
+});
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: process.env.NODE_ENV === "production" }, // Secure trong production
+    cookie: { secure: process.env.NODE_ENV === "production" },
   })
 );
 
-// Khởi tạo Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Load Google Strategy
 require("./config/passport")(passport);
 
-// Cung cấp file tĩnh
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-
-
-// Socket.IO: Quản lý kết nối admin
-const adminSockets = new Map();
-
-io.use(async (socket, next) => {
-  try {
-    const token = socket.handshake.auth.token;
-    if (!token) {
-      return next(new Error("Authentication error: No token provided"));
-    }
-
-    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-    const user = await User.findById(decoded.userId).lean();
-    if (!user || user.role !== "admin") {
-      return next(new Error("Authentication error: Admin role required"));
-    }
-
-    socket.user = user;
-    next();
-  } catch (error) {
-    next(new Error("Authentication error: " + error.message));
-  }
-});
-
-io.on("connection", (socket) => {
-  console.log(`Admin connected: ${socket.user._id}`);
-  adminSockets.set(socket.user._id.toString(), socket);
-
-  socket.on("disconnect", () => {
-    console.log(`Admin disconnected: ${socket.user._id}`);
-    adminSockets.delete(socket.user._id.toString());
+app.get("/api/admin-sockets", (req, res) => {
+  const connectedAdmins = Array.from(adminSockets.keys());
+  res.json({
+    status: "SUCCESS",
+    message: "List of connected admin sockets",
+    data: {
+      count: connectedAdmins.length,
+      adminIds: connectedAdmins,
+    },
   });
 });
 
-// Routes
+app.post("/api/test-new-order", (req, res) => {
+  const notification = {
+    orderId: "test123",
+    customerId: "test789",
+    type: "reservation",
+    status: "pending",
+    staffId: null,
+    time: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    message: "Test new order notification",
+  };
+
+  // console.log("Sending newOrder notification to adminRoom:", notification);
+  // console.log("Current adminRoom sockets:", io.sockets.adapter.rooms.get('adminRoom')?.size || 0);
+  io.to('adminRoom').emit("newOrder", notification);
+
+  res.json({
+    status: "SUCCESS",
+    message: "Test newOrder notification sent",
+    data: notification,
+  });
+});
+
 const connectDB = require("./config/db.config.js");
-const userRoutes = require("./routes/user.routes");
+const userRoutes = require("./routes/user.routes.js");
 const tableRouter = require("./routes/table.routes.js");
 const orderRouter = require("./routes/order.routes.js");
 const itemRouter = require("./routes/item.routes.js");
@@ -109,46 +149,7 @@ app.use("/item-order", itemOrdRouter);
 app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
 
-// Khởi động server
 const PORT = process.env.PORT || 8080;
-
-// function kiemTraBienMoiTruong() {
-//   const bienBatBuoc = [
-//     "PORT",
-//     "MONGO_URI",
-//     "ACCESS_TOKEN_SECRET",
-//     "ACCESS_TOKEN_LIFE",
-//     "REFRESH_TOKEN_SECRET",
-//     "REFRESH_TOKEN_LIFE",
-//     "REFRESH_TOKEN_SIZE",
-//     "END_TIME_OFFSET_MINUTES",
-//     "EMAIL_USER",
-//     "EMAIL_PASS",
-//     "GOOGLE_CLIENT_ID",
-//     "GOOGLE_CLIENT_SECRET",
-//     "GOOGLE_CALLBACK_URL",
-//     "SESSION_SECRET",
-//     "FRONTEND_URL",
-//     "VT_ENV",
-//   ];
-
-//   console.log("=== KIỂM TRA BIẾN MÔI TRƯỜNG ===");
-//   for (const tenBien of bienBatBuoc) {
-//     if (process.env[tenBien]) {
-//       const giaTriHienThi =
-//         process.env[tenBien].length > 5
-//           ? process.env[tenBien].substring(0, 3) + "..."
-//           : "[có giá trị]";
-//       console.log(`✅ ${tenBien}: ${giaTriHienThi}`);
-//     } else {
-//       console.log(`❌ ${tenBien}: THIẾU`);
-//     }
-//   }
-//   console.log("================================");
-// }
-
-// Gọi hàm kiểm tra
-// kiemTraBienMoiTruong();
 
 connectDB()
   .then(() => {
@@ -160,4 +161,4 @@ connectDB()
     console.error("Unable to connect to the database:", err);
   });
 
-  module.exports = { app, server, io, adminSockets };
+module.exports = { app, server, io, adminSockets };

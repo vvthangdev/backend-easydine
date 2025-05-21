@@ -114,6 +114,7 @@ const login = async (req, res) => {
     }
 
     const dataForAccessToken = {
+      _id: user._id.toString(), // Thêm _id vào payload
       username: user.username,
       role: user.role,
     };
@@ -199,7 +200,17 @@ const refreshToken = async (req, res) => {
       refreshTokenSecret
     );
 
+    const user = await User.findOne({ username: decoded.payload.username });
+    if (!user) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
+    }
+
     const dataForAccessToken = {
+      _id: user._id.toString(), // Thêm _id vào payload
       username: decoded.payload.username,
       role: decoded.payload.role,
     };
@@ -512,6 +523,7 @@ const googleLoginCallback = async (req, res) => {
     const user = req.user;
 
     const dataForAccessToken = {
+      _id: user._id.toString(), // Thêm _id vào payload
       username: user.username,
       role: user.role,
     };

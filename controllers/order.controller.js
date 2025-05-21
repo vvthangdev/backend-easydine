@@ -116,12 +116,29 @@ const createOrder = async (req, res) => {
       data: newOrder,
     };
 
+    // Gửi thông báo Socket.IO đến admin
+    setImmediate(() => {
+      const notification = {
+        orderId: newOrder._id.toString(),
+        customerId: newOrder.customer_id.toString(),
+        type: newOrder.type,
+        status: newOrder.status,
+        staffId: newOrder.staff_id?.toString() || null,
+        time: newOrder.time.toISOString(),
+        createdAt: new Date().toISOString(),
+        message: `New order ${newOrder._id} created by ${req.user.username}`,
+      };
+
+      io.to('adminRoom').emit('newOrder', notification);
+    });
+
+    // Gửi email xác nhận
     setImmediate(async () => {
       try {
         const user = await getUserByUserId(req.user._id);
         await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
       } catch (emailError) {
-        // No logging
+        console.error('Error sending email:', emailError.message);
       }
     });
 
@@ -137,6 +154,7 @@ const createOrder = async (req, res) => {
     session.endSession();
   }
 };
+
 
 const updateOrder = async (req, res) => {
   const session = await mongoose.startSession({
