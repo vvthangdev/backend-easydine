@@ -337,6 +337,8 @@ const deleteUser = async (req, res) => {
   }
 };
 
+
+
 const sendOTP = async (req, res) => {
   try {
     const { email } = req.body;
@@ -445,79 +447,6 @@ const getUserById = async (req, res) => {
   }
 };
 
-const updateUserByAdmin = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { email, password, username, name, phone, role, address, avatar } =
-      req.body;
-
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "ID người dùng hợp lệ là bắt buộc!",
-        data: null,
-      });
-    }
-
-    const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy người dùng!",
-        data: null,
-      });
-    }
-
-    const updateData = {};
-    if (email) updateData.email = email;
-    if (name) updateData.name = name;
-    if (phone) updateData.phone = phone;
-    if (address) updateData.address = address;
-    if (avatar) updateData.avatar = avatar;
-    if (username) updateData.username = username;
-    if (role && ["ADMIN", "STAFF", "CUSTOMER"].includes(role)) {
-      updateData.role = role;
-    }
-    if (password) {
-      const saltRounds = 10;
-      updateData.password = await bcrypt.hash(password, saltRounds);
-    }
-
-    if (email || username) {
-      const existingUser = await User.findOne({
-        $or: [{ email: updateData.email }, { username: updateData.username }],
-        _id: { $ne: id },
-      });
-      if (existingUser) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "Email hoặc tên người dùng đã tồn tại!",
-          data: null,
-        });
-      }
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      id,
-      { $set: updateData },
-      { new: true, select: "-password -refresh_token" }
-    );
-
-    return res.status(200).json({
-      status: "SUCCESS",
-      message: "Cập nhật người dùng bởi admin thành công!",
-      data: updatedUser,
-    });
-  } catch (error) {
-    console.error("Lỗi khi cập nhật người dùng bởi admin:", error);
-    return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi cập nhật người dùng!",
-      data: null,
-    });
-  }
-};
-
 const googleLoginCallback = async (req, res) => {
   try {
     const user = req.user;
@@ -608,69 +537,7 @@ const handlePaymentReturn = async (req, res) => {
   }
 };
 
-const deactivateUser = async (req, res) => {
-  try {
-    const { id } = req.params;
 
-    const user = await User.findByIdAndUpdate(
-      id,
-      { isActive: false },
-      { new: true }
-    );
-    if (!user) {
-      return res.status(404).json({
-        status: 'ERROR',
-        message: 'Không tìm thấy người dùng!',
-        data: null,
-      });
-    }
-
-    return res.status(200).json({
-      status: 'SUCCESS',
-      message: 'Khóa tài khoản thành công!',
-      data: user,
-    });
-  } catch (error) {
-    console.error('Lỗi khi khóa tài khoản:', error);
-    return res.status(500).json({
-      status: 'ERROR',
-      message: error.message || 'Đã xảy ra lỗi khi khóa tài khoản!',
-      data: null,
-    });
-  }
-};
-
-const activateUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const user = await User.findByIdAndUpdate(
-      id,
-      { isActive: true },
-      { new: true }
-    );
-    if (!user) {
-      return res.status(404).json({
-        status: 'ERROR',
-        message: 'Không tìm thấy người dùng!',
-        data: null,
-      });
-    }
-
-    return res.status(200).json({
-      status: 'SUCCESS',
-      message: 'Mở khóa tài khoản thành công!',
-      data: user,
-    });
-  } catch (error) {
-    console.error('Lỗi khi mở khóa tài khoản:', error);
-    return res.status(500).json({
-      status: 'ERROR',
-      message: error.message || 'Đã xảy ra lỗi khi mở khóa tài khoản!',
-      data: null,
-    });
-  }
-};
 
 module.exports = {
   getAllUsers,
@@ -684,9 +551,6 @@ module.exports = {
   sendOTP,
   searchUsers,
   getUserById,
-  updateUserByAdmin,
   googleLoginCallback,
   handlePaymentReturn,
-  deactivateUser,
-  activateUser,
 };
