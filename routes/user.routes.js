@@ -47,8 +47,8 @@ router.get(
   userController.searchUsers
 );
 
-router.get(
-  "/:id",
+router.post(
+  "/user",
   authMiddleware.authenticateToken,
   userController.getUserById
 );

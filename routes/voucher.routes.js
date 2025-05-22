@@ -13,6 +13,15 @@ router.post("/", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth,
 // Lấy voucher theo code (mọi vai trò)
 router.get("/code/:code", authMiddleware.authenticateToken, voucherController.getVoucher);
 
+// Thêm người dùng vào voucher (chỉ ADMIN)
+router.post("/add/users", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.addUsersToVoucher);
+
+// Xóa người dùng khỏi voucher (chỉ ADMIN)
+router.delete("/delete/users", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.removeUsersFromVoucher);
+
+// Áp dụng voucher cho đơn hàng (chỉ STAFF hoặc CUSTOMER)
+router.post("/apply", authMiddleware.authenticateToken, voucherController.applyVoucherToOrder);
+
 // Lấy voucher theo ID (mọi vai trò)
 router.get("/:id", authMiddleware.authenticateToken, voucherController.getVoucherById);
 
@@ -21,14 +30,5 @@ router.patch("/:id", authMiddleware.authenticateToken, authMiddleware.adminRoleA
 
 // Xóa voucher (chỉ ADMIN)
 router.delete("/:id", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.deleteVoucher);
-
-// Thêm người dùng vào voucher (chỉ ADMIN) - Đã sửa
-router.post("/add/users", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.addUsersToVoucher);
-
-// Xóa người dùng khỏi voucher (chỉ ADMIN) - Đã sửa
-router.delete("/delete/users", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.removeUsersFromVoucher);
-
-// Áp dụng voucher cho đơn hàng (chỉ STAFF hoặc CUSTOMER)
-router.post("/apply", authMiddleware.authenticateToken, voucherController.applyVoucherToOrder);
 
 module.exports = router;

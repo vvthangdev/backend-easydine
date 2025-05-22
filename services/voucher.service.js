@@ -16,6 +16,14 @@ async function getAllVouchers() {
 
 async function createVoucher(voucherData) {
   try {
+    // Kiểm tra và làm sạch applicableUsers trong voucherData
+    if (voucherData.applicableUsers && Array.isArray(voucherData.applicableUsers)) {
+      const validUserIds = voucherData.applicableUsers
+        .filter(id => mongoose.isValidObjectId(id))
+        .map(id => new mongoose.Types.ObjectId(id));
+      voucherData.applicableUsers = [...new Set(validUserIds.map(id => id.toString()))]
+        .map(id => new mongoose.Types.ObjectId(id));
+    }
     const newVoucher = new Voucher(voucherData);
     await newVoucher.save();
     return newVoucher;
@@ -49,12 +57,21 @@ async function getVoucherById(id) {
 
 async function updateVoucher(id, data) {
   try {
+    // Kiểm tra và làm sạch applicableUsers trong data
+    if (data.applicableUsers && Array.isArray(data.applicableUsers)) {
+      const validUserIds = data.applicableUsers
+        .filter(id => mongoose.isValidObjectId(id))
+        .map(id => new mongoose.Types.ObjectId(id));
+      // Loại bỏ trùng lặp bằng Set
+      data.applicableUsers = [...new Set(validUserIds.map(id => id.toString()))]
+        .map(id => new mongoose.Types.ObjectId(id));
+    }
     const voucher = await Voucher.findByIdAndUpdate(id, data, { new: true });
     if (!voucher) throw new Error('Voucher không tồn tại');
     return voucher;
   } catch (error) {
     console.error('Error updating voucher:', error);
-    throw new Error('Lỗi khi cập nhật voucher');
+    throw new Error(error.message || 'Lỗi khi cập nhật voucher');
   }
 }
 
@@ -71,10 +88,27 @@ async function deleteVoucher(id) {
 
 async function addUsersToVoucher(voucherId, userIds) {
   try {
+    // Kiểm tra voucherId hợp lệ
+    if (!mongoose.isValidObjectId(voucherId)) {
+      throw new Error('ID voucher không hợp lệ');
+    }
+
+    // Kiểm tra và chuyển đổi userIds thành ObjectId
+    const validUserIds = userIds
+      .filter(id => mongoose.isValidObjectId(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (validUserIds.length === 0) {
+      throw new Error('Không có ID người dùng hợp lệ để thêm');
+    }
+
     const voucher = await Voucher.findById(voucherId);
     if (!voucher) throw new Error('Voucher không tồn tại');
 
-    const updatedUsers = [...new Set([...voucher.applicableUsers, ...userIds])];
+    // Loại bỏ trùng lặp bằng Set
+    const updatedUsers = [...new Set([...voucher.applicableUsers.map(id => id.toString()), ...validUserIds.map(id => id.toString())])]
+      .map(id => new mongoose.Types.ObjectId(id));
+
     const updatedVoucher = await Voucher.findByIdAndUpdate(
       voucherId,
       { applicableUsers: updatedUsers },
@@ -83,20 +117,31 @@ async function addUsersToVoucher(voucherId, userIds) {
     return updatedVoucher;
   } catch (error) {
     console.error('Error adding users to voucher:', error);
-    throw new Error('Lỗi khi thêm người dùng vào voucher');
+    throw new Error(error.message || 'Lỗi khi thêm người dùng vào voucher');
   }
 }
 
 async function removeUsersFromVoucher(voucherId, userIds) {
   try {
+    // Kiểm tra voucherId hợp lệ
+    if (!mongoose.isValidObjectId(voucherId)) {
+      throw new Error('ID voucher không hợp lệ');
+    }
+
+    // Kiểm tra và chuyển đổi userIds thành ObjectId
+    const validUserIds = userIds
+      .filter(id => mongoose.isValidObjectId(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (validUserIds.length === 0) {
+      throw new Error('Không có ID người dùng hợp lệ để xóa');
+    }
+
     const voucher = await Voucher.findById(voucherId);
     if (!voucher) throw new Error('Voucher không tồn tại');
 
-    // Chuyển đổi userIds thành ObjectId
-    const objectIdUserIds = userIds.map(id => new mongoose.Types.ObjectId(id));
-
     const updatedUsers = voucher.applicableUsers.filter(
-      (userId) => !objectIdUserIds.some((id) => id.equals(userId))
+      (userId) => !validUserIds.some((id) => id.equals(userId))
     );
 
     const updatedVoucher = await Voucher.findByIdAndUpdate(
@@ -107,7 +152,7 @@ async function removeUsersFromVoucher(voucherId, userIds) {
     return updatedVoucher;
   } catch (error) {
     console.error('Error removing users from voucher:', error);
-    throw new Error('Lỗi khi xóa người dùng khỏi voucher');
+    throw new Error(error.message || 'Lỗi khi xóa người dùng khỏi voucher');
   }
 }
 

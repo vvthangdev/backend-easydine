@@ -1,11 +1,10 @@
 const express = require("express");
-const userMiddleware = require("../middlewares/user.middleware.js");
 const adminController = require("../controllers/admin.controller.js");
 const authMiddleware = require("../middlewares/auth.middleware.js");
 
 const router = express.Router();
 
-// Xóa người dùng
+// Xóa người dùng (nhận id hoặc username trong body)
 router.delete(
   "/delete",
   authMiddleware.authenticateToken,
@@ -13,7 +12,7 @@ router.delete(
   adminController.deleteUserByAdmin
 );
 
-// Cập nhật người dùng
+// Cập nhật người dùng (nhận id hoặc username trong body)
 router.patch(
   "/update",
   authMiddleware.authenticateToken,
@@ -37,19 +36,7 @@ router.patch(
   adminController.activateUser
 );
 
-// Các route khác giữ nguyên
-router.delete(
-  "/delete-user",
-  authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
-  adminController.adminDeleteUser
-);
-router.patch(
-  "/update-user/:id",
-  authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
-  adminController.adminUpdateUser
-);
+// Lấy thông tin khách hàng
 router.get(
   "/customer",
   authMiddleware.authenticateToken,

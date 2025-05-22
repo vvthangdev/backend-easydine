@@ -1,6 +1,24 @@
 const voucherService = require("../services/voucher.service");
 const mongoose = require('mongoose');
 
+const getAllVouchers = async (req, res) => {
+  try {
+    const vouchers = await voucherService.getAllVouchers();
+    return res.status(200).json({
+      status: 'SUCCESS',
+      message: 'Lấy danh sách voucher thành công!',
+      data: vouchers,
+    });
+  } catch (error) {
+    console.error('Lỗi khi lấy danh sách voucher:', error);
+    return res.status(500).json({
+      status: 'ERROR',
+      message: error.message || 'Đã xảy ra lỗi khi lấy danh sách voucher!',
+      data: null,
+    });
+  }
+};
+
 const createVoucher = async (req, res) => {
   try {
     const { ...voucherData } = req.body;
@@ -11,6 +29,11 @@ const createVoucher = async (req, res) => {
         message: "Dữ liệu voucher là bắt buộc!",
         data: null,
       });
+    }
+
+    // Làm sạch applicableUsers tại controller
+    if (voucherData.applicableUsers && Array.isArray(voucherData.applicableUsers)) {
+      voucherData.applicableUsers = [...new Set(voucherData.applicableUsers)];
     }
 
     const voucher = await voucherService.createVoucher(voucherData);
@@ -24,7 +47,7 @@ const createVoucher = async (req, res) => {
     console.error("Lỗi khi tạo voucher:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi tạo voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi tạo voucher!',
       data: null,
     });
   }
@@ -60,7 +83,7 @@ const getVoucher = async (req, res) => {
     console.error("Lỗi khi lấy voucher:", error);
     return res.status(400).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi lấy voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi lấy voucher!',
       data: null,
     });
   }
@@ -96,7 +119,7 @@ const getVoucherById = async (req, res) => {
     console.error("Lỗi khi lấy voucher theo ID:", error);
     return res.status(400).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi lấy voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi lấy voucher!',
       data: null,
     });
   }
@@ -123,6 +146,11 @@ const updateVoucher = async (req, res) => {
       });
     }
 
+    // Làm sạch applicableUsers tại controller
+    if (updateData.applicableUsers && Array.isArray(updateData.applicableUsers)) {
+      updateData.applicableUsers = [...new Set(updateData.applicableUsers)];
+    }
+
     const voucher = await voucherService.updateVoucher(id, updateData);
     if (!voucher) {
       return res.status(404).json({
@@ -141,7 +169,7 @@ const updateVoucher = async (req, res) => {
     console.error("Lỗi khi cập nhật voucher:", error);
     return res.status(400).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi cập nhật voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi cập nhật voucher!',
       data: null,
     });
   }
@@ -177,7 +205,7 @@ const deleteVoucher = async (req, res) => {
     console.error("Lỗi khi xóa voucher:", error);
     return res.status(400).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi xóa voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi xóa voucher!',
       data: null,
     });
   }
@@ -195,10 +223,10 @@ const addUsersToVoucher = async (req, res) => {
       });
     }
 
-    if (!userIds || !Array.isArray(userIds)) {
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({
         status: "ERROR",
-        message: "userIds phải là một mảng!",
+        message: "userIds phải là một mảng không rỗng!",
         data: null,
       });
     }
@@ -212,18 +240,20 @@ const addUsersToVoucher = async (req, res) => {
       });
     }
 
-    // Kiểm tra userIds hợp lệ
-    for (const userId of userIds) {
-      if (!mongoose.isValidObjectId(userId)) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: `ID người dùng không hợp lệ: ${userId}`,
-          data: null,
-        });
-      }
+    // Làm sạch userIds tại controller
+    const validUserIds = [...new Set(userIds)]
+      .filter(id => mongoose.isValidObjectId(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (validUserIds.length === 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Không có ID người dùng hợp lệ!",
+        data: null,
+      });
     }
 
-    const updatedVoucher = await voucherService.addUsersToVoucher(voucherId, userIds);
+    const updatedVoucher = await voucherService.addUsersToVoucher(voucherId, validUserIds);
     if (!updatedVoucher) {
       return res.status(404).json({
         status: "ERROR",
@@ -241,7 +271,7 @@ const addUsersToVoucher = async (req, res) => {
     console.error("Lỗi khi thêm người dùng vào voucher:", error);
     return res.status(400).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi thêm người dùng vào voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi thêm người dùng vào voucher!',
       data: null,
     });
   }
@@ -259,10 +289,10 @@ const removeUsersFromVoucher = async (req, res) => {
       });
     }
 
-    if (!userIds || !Array.isArray(userIds)) {
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({
         status: "ERROR",
-        message: "userIds phải là một mảng!",
+        message: "userIds phải là một mảng không rỗng!",
         data: null,
       });
     }
@@ -276,18 +306,20 @@ const removeUsersFromVoucher = async (req, res) => {
       });
     }
 
-    // Kiểm tra userIds hợp lệ
-    for (const userId of userIds) {
-      if (!mongoose.isValidObjectId(userId)) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: `ID người dùng không hợp lệ: ${userId}`,
-          data: null,
-        });
-      }
+    // Làm sạch userIds tại controller
+    const validUserIds = [...new Set(userIds)]
+      .filter(id => mongoose.isValidObjectId(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (validUserIds.length === 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Không có ID người dùng hợp lệ!",
+        data: null,
+      });
     }
 
-    const updatedVoucher = await voucherService.removeUsersFromVoucher(voucherId, userIds);
+    const updatedVoucher = await voucherService.removeUsersFromVoucher(voucherId, validUserIds);
     if (!updatedVoucher) {
       return res.status(404).json({
         status: "ERROR",
@@ -305,7 +337,7 @@ const removeUsersFromVoucher = async (req, res) => {
     console.error("Lỗi khi xóa người dùng khỏi voucher:", error);
     return res.status(400).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi xóa người dùng khỏi voucher!",
+      message: error.message || 'Đã xảy ra lỗi khi xóa người dùng khỏi voucher!',
       data: null,
     });
   }
@@ -337,24 +369,6 @@ const applyVoucherToOrder = async (req, res) => {
     return res.status(400).json({
       status: 'ERROR',
       message: error.message || 'Đã xảy ra lỗi khi áp dụng voucher',
-      data: null,
-    });
-  }
-};
-
-const getAllVouchers = async (req, res) => {
-  try {
-    const vouchers = await voucherService.getAllVouchers();
-    return res.status(200).json({
-      status: 'SUCCESS',
-      message: 'Lấy danh sách voucher thành công!',
-      data: vouchers,
-    });
-  } catch (error) {
-    console.error('Lỗi khi lấy danh sách voucher:', error);
-    return res.status(500).json({
-      status: 'ERROR',
-      message: error.message || 'Đã xảy ra lỗi khi lấy danh sách voucher!',
       data: null,
     });
   }
