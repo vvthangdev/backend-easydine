@@ -781,12 +781,7 @@ const splitOrder = async (req, res) => {
 };
 
 const mergeOrder = async (req, res) => {
-  const session = await mongoose.startSession({
-    defaultTransactionOptions: {
-      readConcern: { level: 'snapshot' },
-      writeConcern: { w: 'majority' }, // Đảm bảo dữ liệu được replicate trong replica set
-    }
-  });
+  const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const { source_order_id, target_order_id } = req.body;
@@ -802,11 +797,9 @@ const mergeOrder = async (req, res) => {
       throw new Error("Đơn hàng nguồn và đích phải khác nhau");
     }
 
-    // Lấy thông tin đơn hàng trong transaction
-    const [sourceOrder, targetOrder] = await Promise.all([
-      OrderDetail.findById(source_order_id).session(session),
-      OrderDetail.findById(target_order_id).session(session),
-    ]);
+    // Lấy thông tin đơn hàng
+    const sourceOrder = await OrderDetail.findById(source_order_id).session(session);
+    const targetOrder = await OrderDetail.findById(target_order_id).session(session);
 
     if (!sourceOrder) {
       throw new Error("Không tìm thấy đơn hàng nguồn");
@@ -815,51 +808,55 @@ const mergeOrder = async (req, res) => {
       throw new Error("Không tìm thấy đơn hàng đích");
     }
 
-    if (!['pending', 'confirmed'].includes(sourceOrder.status)) {
+    // Kiểm tra trạng thái và type
+    if (!["pending", "confirmed"].includes(sourceOrder.status)) {
       throw new Error("Chỉ có thể gộp đơn hàng ở trạng thái pending hoặc confirmed");
     }
-    if (!['pending', 'confirmed'].includes(targetOrder.status)) {
+    if (!["pending", "confirmed"].includes(targetOrder.status)) {
       throw new Error("Chỉ có thể gộp vào đơn hàng ở trạng thái pending hoặc confirmed");
+    }
+    if (sourceOrder.type !== targetOrder.type) {
+      throw new Error("Đơn hàng nguồn và đích phải có cùng type");
     }
 
     // Lấy danh sách món ăn
-    const [sourceItemOrders, targetItemOrders] = await Promise.all([
-      ItemOrder.find({ order_id: sourceOrder._id }).session(session),
-      ItemOrder.find({ order_id: targetOrder._id }).session(session),
-    ]);
+    const sourceItemOrders = await ItemOrder.find({ order_id: sourceOrder._id }).session(session);
+    const targetItemOrders = await ItemOrder.find({ order_id: targetOrder._id }).session(session);
 
     // Gộp món ăn
     const itemMap = new Map();
     for (const item of targetItemOrders) {
-      const key = `${item.item_id}-${item.size || 'default'}`;
+      const key = `${item.item_id}-${item.size || "default"}`;
       itemMap.set(key, {
         item_id: item.item_id,
         quantity: item.quantity,
         size: item.size,
-        note: item.note || '',
+        note: item.note || "",
       });
     }
 
     for (const item of sourceItemOrders) {
-      const key = `${item.item_id}-${item.size || 'default'}`;
+      const key = `${item.item_id}-${item.size || "default"}`;
       if (itemMap.has(key)) {
         itemMap.get(key).quantity += item.quantity;
         if (item.note && item.note !== itemMap.get(key).note) {
-          itemMap.get(key).note = `${itemMap.get(key).note ? itemMap.get(key).note + '; ' : ''}${item.note}`;
+          itemMap.get(key).note = `${itemMap.get(key).note ? itemMap.get(key).note + "; " : ""}${item.note}`;
         }
       } else {
         itemMap.set(key, {
           item_id: item.item_id,
           quantity: item.quantity,
           size: item.size,
-          note: item.note || '',
+          note: item.note || "",
         });
       }
     }
 
-    // Xóa món ăn cũ của đơn đích và tạo mới
+    // Xóa món ăn cũ của đơn đích
     await ItemOrder.deleteMany({ order_id: targetOrder._id }).session(session);
-    const newItemOrders = Array.from(itemMap.values()).map(item => ({
+
+    // Tạo mới món ăn cho đơn đích
+    const newItemOrders = Array.from(itemMap.values()).map((item) => ({
       item_id: item.item_id,
       quantity: item.quantity,
       order_id: targetOrder._id,
@@ -869,29 +866,31 @@ const mergeOrder = async (req, res) => {
     await orderService.createItemOrders(newItemOrders, { session });
 
     // Chuyển bàn từ đơn nguồn sang đơn đích
-    await ReservedTable.updateMany(
-      { reservation_id: sourceOrder._id },
-      { reservation_id: targetOrder._id },
-      { session }
-    );
+    if (sourceOrder.type === "reservation") {
+      await ReservedTable.updateMany(
+        { reservation_id: sourceOrder._id },
+        { reservation_id: targetOrder._id },
+        { session }
+      );
+    }
 
     // Xóa đơn nguồn và các bản ghi liên quan
-    await Promise.all([
-      ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session),
-      ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session),
-      OrderDetail.findByIdAndDelete(sourceOrder._id).session(session),
-    ]);
+    await ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session);
+    await ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session);
+    await OrderDetail.deleteOne({ _id: sourceOrder._id }, { session });
+
+    // Cập nhật thời gian đơn đích
+    targetOrder.updated_at = new Date();
+    await targetOrder.save({ session });
 
     // Cam kết transaction
     await session.commitTransaction();
 
-    // Chuẩn bị response
+    // Lấy thông tin chi tiết cho response (sau transaction)
     const enrichedItemOrders = await Promise.all(
       newItemOrders.map(async (itemOrder) => {
-        const item = await Item.findById(itemOrder.item_id);
-        const sizeInfo = item && itemOrder.size && item.sizes
-          ? item.sizes.find(s => s.name === itemOrder.size)
-          : null;
+        const item = await Item.findById(itemOrder.item_id); // Không cần session
+        const sizeInfo = item && itemOrder.size && item.sizes ? item.sizes.find((s) => s.name === itemOrder.size) : null;
         return {
           item_id: itemOrder.item_id,
           quantity: itemOrder.quantity,
@@ -899,25 +898,25 @@ const mergeOrder = async (req, res) => {
           note: itemOrder.note,
           itemName: item ? item.name : null,
           itemImage: item ? item.image : null,
-          itemPrice: sizeInfo ? sizeInfo.price : (item ? item.price : null),
+          itemPrice: sizeInfo ? sizeInfo.price : item ? item.price : null,
         };
       })
     );
 
     const reservedTables = await ReservedTable.find({ reservation_id: targetOrder._id }).lean();
-    const tableIds = reservedTables.map(rt => rt.table_id);
+    const tableIds = reservedTables.map((rt) => rt.table_id);
     const tablesInfo = await TableInfo.find({ _id: { $in: tableIds } }).lean();
-    const tablesWithStatus = tablesInfo.map(table => ({
+    const tablesWithStatus = tablesInfo.map((table) => ({
       table_id: table._id,
       table_number: table.table_number,
       area: table.area,
       capacity: table.capacity,
-      status: targetOrder.status === 'pending' ? 'Reserved' : 'Occupied',
-      start_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.start_time || null,
-      end_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.end_time || null,
+      status: targetOrder.status === "pending" ? "Reserved" : "Occupied",
+      start_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.start_time || null,
+      end_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time || null,
     }));
 
-    // Trả response trước
+    // Chuẩn bị response
     const response = {
       status: "SUCCESS",
       message: "Gộp đơn hàng thành công!",
@@ -935,13 +934,37 @@ const mergeOrder = async (req, res) => {
       },
     };
 
-    // Gửi email bất đồng bộ sau response
+    // Gửi thông báo Socket.IO bất đồng bộ
+    setImmediate(async () => {
+      try {
+        const { io, adminSockets } = require("../app");
+        const notification = {
+          orderId: target_order_id,
+          sourceOrderId: source_order_id,
+          customerId: targetOrder.customer_id.toString(),
+          type: targetOrder.type,
+          status: targetOrder.status,
+          staffId: req.user?._id?.toString() || null,
+          time: targetOrder.time.toISOString(),
+          createdAt: new Date().toISOString(),
+          message: `Order ${source_order_id} merged into ${target_order_id}`,
+        };
+
+        adminSockets.forEach((socket) => {
+          socket.emit("orderStatusUpdate", notification);
+        });
+      } catch (error) {
+        console.error("Error sending notification:", error.message);
+      }
+    });
+
+    // Gửi email bất đồng bộ
     setImmediate(async () => {
       try {
         const user = await getUserByUserId(targetOrder.customer_id);
         await emailService.sendOrderConfirmationEmail(user.email, user.name, targetOrder);
       } catch (emailError) {
-        console.error('Error sending email:', emailError.message); // Thêm logging để debug
+        console.error("Error sending email:", emailError.message);
       }
     });
 
