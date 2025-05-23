@@ -44,4 +44,11 @@ router.get(
   adminController.adminGetUserInfo
 );
 
+router.get(
+  "/staff",
+  authMiddleware.authenticateToken,
+  authMiddleware.adminRoleAuth,
+  adminController.getAllStaff
+);
+
 module.exports = router;

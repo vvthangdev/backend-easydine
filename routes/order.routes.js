@@ -20,4 +20,7 @@ router.post("/merge-order", authMiddleware.adminRoleAuth, orderController.mergeO
 router.post("/create-payment", authMiddleware.authenticateToken, orderController.createPayment);
 router.get("/payment-return", orderController.handlePaymentReturn);
 router.get("/payment-ipn", orderController.handlePaymentIPN);
+router.post("/add-items-to-order", authMiddleware.authenticateToken, orderController.addItemsToOrder);
+router.post("/cancel-items", authMiddleware.authenticateToken, orderController.cancelItems);
+
 module.exports = router;

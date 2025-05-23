@@ -266,10 +266,27 @@ const adminGetUserInfo = async (req, res) => {
   }
 };
 
+const getAllStaff = async (req, res) => {
+  try {
+    const staff = await User.find({ role: { $in: ["ADMIN", "STAFF"] } });
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Lấy danh sách người dùng thành công!",
+      data: staff,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Lỗi khi lấy danh sách người dùng!",
+      data: null,
+    });
+  }
+};
 module.exports = {
   deleteUserByAdmin,
   updateUserByAdmin,
   deactivateUser,
   activateUser,
   adminGetUserInfo,
+  getAllStaff,
 };

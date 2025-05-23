@@ -4,6 +4,7 @@ const ReservedTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
+const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
 const { getIO } = require("../socket"); // Import io từ app.js
@@ -1225,6 +1226,391 @@ const handlePaymentIPN = async (req, res) => {
     return res.json({ RspCode: "99", Message: "Unknown error" });
   }
 };
+
+const addItemsToOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { order_id, items } = req.body;
+
+    // Kiểm tra đầu vào
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Valid order_id is required!",
+        data: null,
+      });
+    }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Items must be a non-empty array!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await OrderDetail.findById(order_id).session(session);
+    if (!order) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Order not found!",
+        data: null,
+      });
+    }
+    if (!["pending", "confirmed"].includes(order.status)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Items can only be added to pending or confirmed orders!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra món ăn
+    const itemIds = items.map(item => new mongoose.Types.ObjectId(item.id));
+    const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
+    const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+
+    for (const item of items) {
+      if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
+        throw new Error(`Invalid item ID: ${item.id}`);
+      }
+      if (!item.quantity || item.quantity < 1) {
+        throw new Error("Quantity must be a positive number!");
+      }
+      const itemExists = itemMap.get(item.id);
+      if (!itemExists) {
+        throw new Error(`Item with ID ${item.id} not found!`);
+      }
+      if (item.size) {
+        const validSize = itemExists.sizes.find(s => s.name === item.size);
+        if (!validSize) {
+          throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
+        }
+      }
+    }
+
+    // Lấy danh sách món hiện có trong đơn hàng
+    const existingItemOrders = await ItemOrder.find({ order_id: order._id }).session(session);
+    const itemOrderMap = new Map(
+      existingItemOrders.map(io => [`${io.item_id}-${io.size || "default"}`, io])
+    );
+
+    const newItemOrders = [];
+    const updatedItemOrders = [];
+
+    // Xử lý từng món trong request
+    for (const item of items) {
+      const key = `${item.id}-${item.size || "default"}`;
+      const existingItemOrder = itemOrderMap.get(key);
+
+      if (existingItemOrder) {
+        // Cập nhật số lượng món hiện có
+        updatedItemOrders.push({
+          ...existingItemOrder.toObject(),
+          quantity: existingItemOrder.quantity + item.quantity,
+          note: item.note || existingItemOrder.note || "", // Giữ note cũ nếu không có note mới
+        });
+        itemOrderMap.delete(key); // Xóa khỏi map để không xử lý lại
+      } else {
+        // Thêm món mới
+        newItemOrders.push({
+          item_id: new mongoose.Types.ObjectId(item.id),
+          quantity: item.quantity,
+          order_id: order._id,
+          size: item.size || null,
+          note: item.note || "",
+        });
+      }
+    }
+
+    // Giữ các món không bị ảnh hưởng
+    itemOrderMap.forEach(io => updatedItemOrders.push(io.toObject()));
+
+    // Xóa các món cũ và tạo lại
+    await ItemOrder.deleteMany({ order_id: order._id }).session(session);
+    if (updatedItemOrders.length > 0) {
+      await orderService.createItemOrders(updatedItemOrders.concat(newItemOrders), { session });
+    }
+
+    // Cập nhật thời gian đơn hàng
+    order.updated_at = new Date();
+    await order.save({ session });
+
+    await session.commitTransaction();
+
+    // Lấy thông tin chi tiết món để trả về
+    const allItemOrders = await ItemOrder.find({ order_id: order._id }).session(null); // Không cần session sau commit
+    const enrichedItemOrders = await Promise.all(
+      allItemOrders.map(async itemOrder => {
+        const item = itemMap.get(itemOrder.item_id.toString()) || (await Item.findById(itemOrder.item_id));
+        const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find(s => s.name === itemOrder.size) : null;
+        return {
+          _id: itemOrder._id,
+          item_id: itemOrder.item_id,
+          quantity: itemOrder.quantity,
+          size: itemOrder.size,
+          note: itemOrder.note,
+          itemName: item.name,
+          itemImage: item.image,
+          itemPrice: sizeInfo ? sizeInfo.price : item.price,
+        };
+      })
+    );
+
+    // Gửi thông báo Socket.IO
+    setImmediate(async () => {
+      try {
+        const { io, adminSockets } = require("../app");
+        const notification = {
+          orderId: order._id.toString(),
+          customerId: order.customer_id.toString(),
+          type: order.type,
+          status: order.status,
+          staffId: req.user?._id?.toString() || null,
+          time: order.time.toISOString(),
+          createdAt: new Date().toISOString(),
+          message: `Items added to order ${order._id}: ${items
+            .map(i => `${i.quantity} x ${itemMap.get(i.id)?.name || i.id}${i.size ? ` (${i.size})` : ""}`)
+            .join(", ")}`,
+          items: enrichedItemOrders,
+        };
+        adminSockets.forEach(socket => {
+          socket.emit("orderItemsUpdate", notification); // Sử dụng event riêng để phân biệt
+        });
+      } catch (error) {
+        console.error("Error sending notification:", error.message);
+      }
+    });
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Items added to order successfully!",
+      data: {
+        order_id: order._id,
+        items: enrichedItemOrders, // Trả về toàn bộ món trong đơn hàng
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "An error occurred while adding items to order!",
+      data: null,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+const cancelItems = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { order_id, items } = req.body;
+
+    // Kiểm tra đầu vào
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Valid order_id is required!",
+        data: null,
+      });
+    }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Items must be a non-empty array!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await OrderDetail.findById(order_id).session(session);
+    if (!order) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Order not found!",
+        data: null,
+      });
+    }
+    if (!["pending", "confirmed"].includes(order.status)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Items can only be canceled from pending or confirmed orders!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra món ăn
+    const itemIds = items.map(item => new mongoose.Types.ObjectId(item.item_id));
+    const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
+    const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+
+    const existingItemOrders = await ItemOrder.find({ order_id: order._id }).session(session);
+    const itemOrderMap = new Map(
+      existingItemOrders.map(io => [`${io.item_id}-${io.size || "default"}`, io])
+    );
+
+    const canceledItemOrders = [];
+    const updatedItemOrders = [];
+
+    for (const item of items) {
+      if (!item.item_id || !mongoose.Types.ObjectId.isValid(item.item_id)) {
+        throw new Error(`Invalid item ID: ${item.item_id}`);
+      }
+      if (!item.quantity || item.quantity < 1) {
+        throw new Error("Quantity must be a positive number!");
+      }
+      const itemExists = itemMap.get(item.item_id);
+      if (!itemExists) {
+        throw new Error(`Item with ID ${item.item_id} not found!`);
+      }
+      if (item.size) {
+        const validSize = itemExists.sizes.find(s => s.name === item.size);
+        if (!validSize) {
+          throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
+        }
+      }
+
+      const key = `${item.item_id}-${item.size || "default"}`;
+      const existingItemOrder = itemOrderMap.get(key);
+      if (!existingItemOrder) {
+        throw new Error(`Item ${itemExists.name} (size: ${item.size || "default"}) not found in order!`);
+      }
+      if (item.quantity > existingItemOrder.quantity) {
+        throw new Error(
+          `Cancel quantity (${item.quantity}) exceeds ordered quantity (${existingItemOrder.quantity}) for item ${itemExists.name}!`
+        );
+      }
+
+      // Lưu món hủy
+      canceledItemOrders.push({
+        item_id: new mongoose.Types.ObjectId(item.item_id),
+        quantity: item.quantity,
+        order_id: order._id,
+        size: item.size || null,
+        note: existingItemOrder.note || "",
+        cancel_reason: item.cancel_reason || "",
+        canceled_by: req.user._id,
+      });
+
+      // Cập nhật số lượng món còn lại
+      const remainingQuantity = existingItemOrder.quantity - item.quantity;
+      if (remainingQuantity > 0) {
+        updatedItemOrders.push({
+          ...existingItemOrder.toObject(),
+          quantity: remainingQuantity,
+        });
+      }
+      itemOrderMap.delete(key); // Xóa khỏi map
+    }
+
+    // Giữ các món không bị ảnh hưởng
+    itemOrderMap.forEach(io => updatedItemOrders.push(io.toObject()));
+
+    // Xóa các món cũ và tạo lại
+    await ItemOrder.deleteMany({ order_id: order._id }).session(session);
+    if (updatedItemOrders.length > 0) {
+      await orderService.createItemOrders(updatedItemOrders, { session });
+    }
+
+    // Lưu các món đã hủy
+    const createdCanceledItems = await CanceledItemOrder.insertMany(canceledItemOrders, { session });
+
+    // Cập nhật thời gian đơn hàng
+    order.updated_at = new Date();
+    await order.save({ session });
+
+    await session.commitTransaction();
+
+    // Lấy thông tin chi tiết món hủy
+    const enrichedCanceledItems = await Promise.all(
+      createdCanceledItems.map(async itemOrder => {
+        const item = itemMap.get(itemOrder.item_id.toString()) || (await Item.findById(itemOrder.item_id));
+        const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find(s => s.name === itemOrder.size) : null;
+        return {
+          _id: itemOrder._id,
+          item_id: itemOrder.item_id,
+          quantity: itemOrder.quantity,
+          size: itemOrder.size,
+          note: itemOrder.note,
+          cancel_reason: itemOrder.cancel_reason,
+          canceled_by: itemOrder.canceled_by,
+          canceled_at: itemOrder.canceled_at,
+          itemName: item.name,
+          itemImage: item.image,
+          itemPrice: sizeInfo ? sizeInfo.price : item.price,
+        };
+      })
+    );
+
+    // Lấy danh sách món còn lại để trả về
+    const remainingItemOrders = await ItemOrder.find({ order_id: order._id }).session(null);
+    const enrichedRemainingItems = await Promise.all(
+      remainingItemOrders.map(async itemOrder => {
+        const item = itemMap.get(itemOrder.item_id.toString()) || (await Item.findById(itemOrder.item_id));
+        const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find(s => s.name === itemOrder.size) : null;
+        return {
+          _id: itemOrder._id,
+          item_id: itemOrder.item_id,
+          quantity: itemOrder.quantity,
+          size: itemOrder.size,
+          note: itemOrder.note,
+          itemName: item.name,
+          itemImage: item.image,
+          itemPrice: sizeInfo ? sizeInfo.price : item.price,
+        };
+      })
+    );
+
+    // Gửi thông báo Socket.IO
+    setImmediate(async () => {
+      try {
+        const { io, adminSockets } = require("../app");
+        const notification = {
+          orderId: order._id.toString(),
+          customerId: order.customer_id.toString(),
+          type: order.type,
+          status: order.status,
+          staffId: req.user?._id?.toString() || null,
+          time: order.time.toISOString(),
+          createdAt: new Date().toISOString(),
+          message: `Items canceled in order ${order._id}: ${items
+            .map(i => `${i.quantity} x ${itemMap.get(i.item_id)?.name || i.item_id}${i.size ? ` (${i.size})` : ""}`)
+            .join(", ")}`,
+          canceledItems: enrichedCanceledItems,
+          remainingItems: enrichedRemainingItems,
+        };
+        adminSockets.forEach(socket => {
+          socket.emit("orderItemsUpdate", notification);
+        });
+      } catch (error) {
+        console.error("Error sending notification:", error.message);
+      }
+    });
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Items canceled successfully!",
+      data: {
+        order_id: order._id,
+        canceledItems: enrichedCanceledItems,
+        remainingItems: enrichedRemainingItems,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "An error occurred while canceling items!",
+      data: null,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 module.exports = {
   getAllOrders,
   getAllOrdersInfo,
@@ -1239,4 +1625,6 @@ module.exports = {
   createPayment,
   handlePaymentReturn,
   handlePaymentIPN,
+  addItemsToOrder,
+  cancelItems,
 };
