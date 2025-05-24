@@ -4,15 +4,19 @@ const ReservedTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
+const Voucher = require("../models/voucher.model");
 const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
 const { getIO } = require("../socket"); // Import io từ app.js
 const socketOrderService = require("../socket/services/order");
+const { calculateOrderTotal } = require("../services/voucher.service");
+const moment = require("moment");
+const qs = require('qs')
 
 const crypto = require("crypto");
 const querystring = require("querystring");
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -27,7 +31,7 @@ const createOrder = async (req, res) => {
         data: null,
       });
     }
-    if (orderData.type === 'reservation' && (!tables || tables.length === 0)) {
+    if (orderData.type === "reservation" && (!tables || tables.length === 0)) {
       return res.status(400).json({
         status: "ERROR",
         message: "At least one table is required for reservation!",
@@ -35,7 +39,7 @@ const createOrder = async (req, res) => {
       });
     }
 
-    if (orderData.type === 'reservation') {
+    if (orderData.type === "reservation") {
       for (const tableId of tables) {
         if (!mongoose.Types.ObjectId.isValid(tableId)) {
           throw new Error("Invalid table_id!");
@@ -48,27 +52,33 @@ const createOrder = async (req, res) => {
       time: new Date(start_time),
       ...orderData,
     };
-    if (orderData.status === 'confirmed') {
+    if (orderData.status === "confirmed") {
       newOrderData.staff_id = req.user._id;
     }
 
     const newOrder = await orderService.createOrder(newOrderData, { session });
 
-    if (orderData.type === 'reservation') {
+    if (orderData.type === "reservation") {
       const startTime = new Date(start_time);
       const endTime = new Date(end_time);
 
-      const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(session);
+      const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(
+        session
+      );
       if (tableInfos.length !== tables.length) {
         throw new Error("One or more table_ids not found!");
       }
 
-      const unavailableTables = await orderService.checkUnavailableTables(startTime, endTime, tables);
+      const unavailableTables = await orderService.checkUnavailableTables(
+        startTime,
+        endTime,
+        tables
+      );
       if (unavailableTables.length > 0) {
         throw new Error("Some selected tables are not available!");
       }
 
-      const reservedTables = tables.map(tableId => ({
+      const reservedTables = tables.map((tableId) => ({
         reservation_id: newOrder._id,
         table_id: new mongoose.Types.ObjectId(tableId),
         start_time: startTime,
@@ -78,9 +88,13 @@ const createOrder = async (req, res) => {
     }
 
     if (items && items.length > 0) {
-      const itemIds = items.map(item => new mongoose.Types.ObjectId(item.id));
-      const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
-      const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+      const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
+      const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+        session
+      );
+      const itemMap = new Map(
+        foundItems.map((item) => [item._id.toString(), item])
+      );
 
       for (const item of items) {
         if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
@@ -94,9 +108,11 @@ const createOrder = async (req, res) => {
           throw new Error(`Item with ID ${item.id} not found!`);
         }
         if (item.size) {
-          const validSize = itemExists.sizes.find(s => s.name === item.size);
+          const validSize = itemExists.sizes.find((s) => s.name === item.size);
           if (!validSize) {
-            throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
+            throw new Error(
+              `Invalid size ${item.size} for item ${itemExists.name}!`
+            );
           }
         }
       }
@@ -128,9 +144,13 @@ const createOrder = async (req, res) => {
     setImmediate(async () => {
       try {
         const user = await getUserByUserId(req.user._id);
-        await emailService.sendOrderConfirmationEmail(user.email, user.name, newOrder);
+        await emailService.sendOrderConfirmationEmail(
+          user.email,
+          user.name,
+          newOrder
+        );
       } catch (emailError) {
-        console.error('Error sending email:', emailError.message);
+        console.error("Error sending email:", emailError.message);
       }
     });
 
@@ -150,13 +170,14 @@ const createOrder = async (req, res) => {
 const updateOrder = async (req, res) => {
   const session = await mongoose.startSession({
     defaultTransactionOptions: {
-      readConcern: { level: 'snapshot' },
-      writeConcern: { w: 'majority' },
+      readConcern: { level: "snapshot" },
+      writeConcern: { w: "majority" },
     },
   });
   session.startTransaction();
   try {
-    const { id, start_time, end_time, tables, items, ...otherFields } = req.body;
+    const { id, start_time, end_time, tables, items, ...otherFields } =
+      req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -178,14 +199,17 @@ const updateOrder = async (req, res) => {
     const updateData = { ...otherFields };
     if (start_time) updateData.time = new Date(start_time);
 
-    if (order.status === 'pending' && otherFields.status === 'confirmed') {
+    if (order.status === "pending" && otherFields.status === "confirmed") {
       if (!req.user._id) {
         throw new Error("Staff ID is required to confirm order!");
       }
       updateData.staff_id = req.user._id;
     }
 
-    if (['completed', 'canceled'].includes(otherFields.status) && order.type === 'reservation') {
+    if (
+      ["completed", "canceled"].includes(otherFields.status) &&
+      order.type === "reservation"
+    ) {
       const currentTime = new Date();
       await ReservedTable.updateMany(
         { reservation_id: id },
@@ -194,7 +218,9 @@ const updateOrder = async (req, res) => {
       );
     }
 
-    const updatedOrder = await orderService.updateOrder(id, updateData, { session });
+    const updatedOrder = await orderService.updateOrder(id, updateData, {
+      session,
+    });
     if (!updatedOrder) {
       return res.status(404).json({
         status: "ERROR",
@@ -203,12 +229,13 @@ const updateOrder = async (req, res) => {
       });
     }
 
-    if (order.type === 'reservation' && tables !== undefined) {
+    if (order.type === "reservation" && tables !== undefined) {
       if (tables.length > 0) {
         if (!start_time || !end_time) {
           return res.status(400).json({
             status: "ERROR",
-            message: "start_time and end_time are required when updating tables!",
+            message:
+              "start_time and end_time are required when updating tables!",
             data: null,
           });
         }
@@ -222,12 +249,19 @@ const updateOrder = async (req, res) => {
         const startTime = new Date(start_time);
         const endTime = new Date(end_time);
 
-        const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(session);
+        const tableInfos = await TableInfo.find({
+          _id: { $in: tables },
+        }).session(session);
         if (tableInfos.length !== tables.length) {
           throw new Error("One or more table_ids not found!");
         }
 
-        const unavailableTables = await orderService.checkUnavailableTables(startTime, endTime, tables, id);
+        const unavailableTables = await orderService.checkUnavailableTables(
+          startTime,
+          endTime,
+          tables,
+          id
+        );
         if (unavailableTables.length > 0) {
           return res.status(400).json({
             status: "ERROR",
@@ -237,7 +271,7 @@ const updateOrder = async (req, res) => {
         }
 
         await ReservedTable.deleteMany({ reservation_id: id }).session(session);
-        const newReservations = tables.map(tableId => ({
+        const newReservations = tables.map((tableId) => ({
           reservation_id: id,
           table_id: new mongoose.Types.ObjectId(tableId),
           start_time: startTime,
@@ -253,9 +287,15 @@ const updateOrder = async (req, res) => {
       await ItemOrder.deleteMany({ order_id: id }).session(session);
 
       if (items.length > 0) {
-        const itemIds = items.map(item => new mongoose.Types.ObjectId(item.id));
-        const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
-        const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+        const itemIds = items.map(
+          (item) => new mongoose.Types.ObjectId(item.id)
+        );
+        const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+          session
+        );
+        const itemMap = new Map(
+          foundItems.map((item) => [item._id.toString(), item])
+        );
 
         for (const item of items) {
           if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
@@ -269,9 +309,13 @@ const updateOrder = async (req, res) => {
             throw new Error(`Item with ID ${item.id} not found!`);
           }
           if (item.size) {
-            const validSize = itemExists.sizes.find(s => s.name === item.size);
+            const validSize = itemExists.sizes.find(
+              (s) => s.name === item.size
+            );
             if (!validSize) {
-              throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
+              throw new Error(
+                `Invalid size ${item.size} for item ${itemExists.name}!`
+              );
             }
           }
         }
@@ -298,7 +342,7 @@ const updateOrder = async (req, res) => {
     if (otherFields.status) {
       setImmediate(async () => {
         try {
-          const { io, adminSockets } = require('../app');
+          const { io, adminSockets } = require("../app");
           const notification = {
             orderId: updatedOrder._id.toString(),
             customerId: updatedOrder.customer_id.toString(),
@@ -311,10 +355,10 @@ const updateOrder = async (req, res) => {
           };
 
           adminSockets.forEach((socket) => {
-            socket.emit('orderStatusUpdate', notification);
+            socket.emit("orderStatusUpdate", notification);
           });
         } catch (error) {
-          console.error('Error sending notification:', error.message);
+          console.error("Error sending notification:", error.message);
         }
       });
     }
@@ -363,7 +407,9 @@ const getOrderInfo = async (req, res) => {
           data: null,
         });
       }
-      order = await OrderDetail.findById(id).lean(); // Sử dụng .lean() để tối ưu
+      order = await OrderDetail.findById(id)
+        .populate("voucher_id", "code") // Populate chỉ lấy trường code
+        .lean();
     }
     // Tìm đơn hàng theo table_id
     else if (table_id) {
@@ -390,7 +436,9 @@ const getOrderInfo = async (req, res) => {
         });
       }
 
-      order = await OrderDetail.findById(reservedTable.reservation_id).lean();
+      order = await OrderDetail.findById(reservedTable.reservation_id)
+        .populate("voucher_id", "code")
+        .lean();
     }
 
     if (!order) {
@@ -402,17 +450,23 @@ const getOrderInfo = async (req, res) => {
     }
 
     // Lấy thông tin bàn
-    const reservedTables = await ReservedTable.find({ reservation_id: order._id }).lean();
-    const tableIds = reservedTables.map(rt => rt.table_id);
+    const reservedTables = await ReservedTable.find({
+      reservation_id: order._id,
+    }).lean();
+    const tableIds = reservedTables.map((rt) => rt.table_id);
     const tablesInfo = await TableInfo.find({ _id: { $in: tableIds } }).lean();
-    const enrichedTables = tablesInfo.map(table => ({
+    const enrichedTables = tablesInfo.map((table) => ({
       table_id: table._id,
       table_number: table.table_number,
       area: table.area,
       capacity: table.capacity,
-      status: order.status === 'pending' ? 'Reserved' : 'Occupied',
-      start_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.start_time || null,
-      end_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.end_time || null,
+      status: order.status === "pending" ? "Reserved" : "Occupied",
+      start_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))
+          ?.start_time || null,
+      end_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time ||
+        null,
     }));
 
     // Lấy thông tin món ăn
@@ -420,9 +474,10 @@ const getOrderInfo = async (req, res) => {
     const enrichedItemOrders = await Promise.all(
       itemOrders.map(async (itemOrder) => {
         const item = await Item.findById(itemOrder.item_id).lean();
-        const sizeInfo = item && itemOrder.size && item.sizes
-          ? item.sizes.find(s => s.name === itemOrder.size)
-          : null;
+        const sizeInfo =
+          item && itemOrder.size && item.sizes
+            ? item.sizes.find((s) => s.name === itemOrder.size)
+            : null;
         return {
           _id: itemOrder._id,
           item_id: itemOrder.item_id,
@@ -432,7 +487,7 @@ const getOrderInfo = async (req, res) => {
           note: itemOrder.note,
           itemName: item ? item.name : null,
           itemImage: item ? item.image : null,
-          itemPrice: sizeInfo ? sizeInfo.price : (item ? item.price : null),
+          itemPrice: sizeInfo ? sizeInfo.price : item ? item.price : null,
         };
       })
     );
@@ -448,12 +503,17 @@ const getOrderInfo = async (req, res) => {
           time: order.time,
           type: order.type,
           status: order.status,
+          voucher_code: order.voucher_id ? order.voucher_id.code : null, // Trả về code thay vì voucher_id
+          total_amount: order.total_amount,
+          discount_amount: order.discount_amount,
+          final_amount: order.final_amount,
         },
         reservedTables: enrichedTables,
         itemOrders: enrichedItemOrders,
       },
     });
   } catch (error) {
+    console.error("Error in getOrderInfo:", error);
     return res.status(500).json({
       status: "ERROR",
       message: error.message || "An error occurred while fetching order info!",
@@ -491,10 +551,12 @@ const getAllOrdersInfo = async (req, res) => {
         for (const itemOrder of itemOrders) {
           const item = await Item.findById(itemOrder.item_id);
           if (item) {
-            const sizeInfo = itemOrder.size && item.sizes
-              ? item.sizes.find(s => s.name === itemOrder.size)
-              : null;
-            totalAmount += (sizeInfo ? sizeInfo.price : item.price) * itemOrder.quantity;
+            const sizeInfo =
+              itemOrder.size && item.sizes
+                ? item.sizes.find((s) => s.name === itemOrder.size)
+                : null;
+            totalAmount +=
+              (sizeInfo ? sizeInfo.price : item.price) * itemOrder.quantity;
           }
         }
         return {
@@ -557,7 +619,9 @@ const searchOrdersByCustomerId = async (req, res) => {
       });
     }
 
-    const orders = await OrderDetail.find({ customer_id: new mongoose.Types.ObjectId(customer_id) });
+    const orders = await OrderDetail.find({
+      customer_id: new mongoose.Types.ObjectId(customer_id),
+    });
 
     return res.status(200).json({
       status: "SUCCESS",
@@ -638,18 +702,22 @@ const splitOrder = async (req, res) => {
     if (!originalOrder) {
       throw new Error("Không tìm thấy đơn hàng gốc");
     }
-    if (!['pending', 'confirmed'].includes(originalOrder.status)) {
-      throw new Error("Chỉ có thể tách đơn hàng ở trạng thái pending hoặc confirmed");
+    if (!["pending", "confirmed"].includes(originalOrder.status)) {
+      throw new Error(
+        "Chỉ có thể tách đơn hàng ở trạng thái pending hoặc confirmed"
+      );
     }
 
-    const originalItemOrders = await ItemOrder.find({ order_id: originalOrder._id }).lean();
+    const originalItemOrders = await ItemOrder.find({
+      order_id: originalOrder._id,
+    }).lean();
     if (!originalItemOrders.length) {
       throw new Error("Không tìm thấy món ăn trong đơn hàng gốc");
     }
 
     const originalQuantities = {};
-    originalItemOrders.forEach(item => {
-      const key = `${item.item_id}-${item.size || 'default'}`;
+    originalItemOrders.forEach((item) => {
+      const key = `${item.item_id}-${item.size || "default"}`;
       originalQuantities[key] = {
         item_id: item.item_id,
         quantity: item.quantity,
@@ -671,31 +739,38 @@ const splitOrder = async (req, res) => {
         throw new Error(`Không tìm thấy món ăn với ID ${item.id}`);
       }
       if (item.size) {
-        const validSize = itemExists.sizes.find(s => s.name === item.size);
+        const validSize = itemExists.sizes.find((s) => s.name === item.size);
         if (!validSize) {
-          throw new Error(`Kích cỡ ${item.size} không hợp lệ cho món ${itemExists.name}`);
+          throw new Error(
+            `Kích cỡ ${item.size} không hợp lệ cho món ${itemExists.name}`
+          );
         }
       }
-      const itemKey = `${item.id}-${item.size || 'default'}`;
+      const itemKey = `${item.id}-${item.size || "default"}`;
       newQuantities[itemKey] = (newQuantities[itemKey] || 0) + item.quantity;
     }
 
     for (const itemKey in newQuantities) {
-      const [itemId, size] = itemKey.split('-');
+      const [itemId, size] = itemKey.split("-");
       const original = originalQuantities[`${itemId}-${size}`];
       if (!original || newQuantities[itemKey] > original.quantity) {
-        throw new Error("Món ăn mới vượt quá số lượng gốc hoặc kích cỡ không khớp");
+        throw new Error(
+          "Món ăn mới vượt quá số lượng gốc hoặc kích cỡ không khớp"
+        );
       }
     }
 
-    const newOrder = await orderService.createOrder({
-      customer_id: originalOrder.customer_id,
-      time: originalOrder.time,
-      type: originalOrder.type,
-      status: originalOrder.status,
-    }, { session });
+    const newOrder = await orderService.createOrder(
+      {
+        customer_id: originalOrder.customer_id,
+        time: originalOrder.time,
+        type: originalOrder.type,
+        status: originalOrder.status,
+      },
+      { session }
+    );
 
-    const newItemOrders = new_items.map(item => ({
+    const newItemOrders = new_items.map((item) => ({
       item_id: new mongoose.Types.ObjectId(item.id),
       quantity: item.quantity,
       order_id: newOrder._id,
@@ -705,8 +780,8 @@ const splitOrder = async (req, res) => {
     await orderService.createItemOrders(newItemOrders, { session });
 
     const remainingItems = {};
-    originalItemOrders.forEach(item => {
-      const itemKey = `${item.item_id}-${item.size || 'default'}`;
+    originalItemOrders.forEach((item) => {
+      const itemKey = `${item.item_id}-${item.size || "default"}`;
       const newQty = newQuantities[itemKey] || 0;
       if (item.quantity > newQty) {
         remainingItems[itemKey] = {
@@ -718,8 +793,10 @@ const splitOrder = async (req, res) => {
       }
     });
 
-    await ItemOrder.deleteMany({ order_id: originalOrder._id }).session(session);
-    const updatedItemOrders = Object.values(remainingItems).map(item => ({
+    await ItemOrder.deleteMany({ order_id: originalOrder._id }).session(
+      session
+    );
+    const updatedItemOrders = Object.values(remainingItems).map((item) => ({
       item_id: item.item_id,
       quantity: item.quantity,
       order_id: originalOrder._id,
@@ -728,17 +805,23 @@ const splitOrder = async (req, res) => {
     }));
     await orderService.createItemOrders(updatedItemOrders, { session });
 
-    const reservedTables = await ReservedTable.find({ reservation_id: originalOrder._id }).lean();
-    const tableIds = reservedTables.map(rt => rt.table_id);
+    const reservedTables = await ReservedTable.find({
+      reservation_id: originalOrder._id,
+    }).lean();
+    const tableIds = reservedTables.map((rt) => rt.table_id);
     const tablesInfo = await TableInfo.find({ _id: { $in: tableIds } }).lean();
-    const tablesWithStatus = tablesInfo.map(table => ({
+    const tablesWithStatus = tablesInfo.map((table) => ({
       table_id: table._id,
       table_number: table.table_number,
       area: table.area,
       capacity: table.capacity,
-      status: originalOrder.status === 'pending' ? 'Reserved' : 'Occupied',
-      start_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.start_time || null,
-      end_time: reservedTables.find(rt => rt.table_id.equals(table._id))?.end_time || null,
+      status: originalOrder.status === "pending" ? "Reserved" : "Occupied",
+      start_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))
+          ?.start_time || null,
+      end_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time ||
+        null,
     }));
 
     await session.commitTransaction();
@@ -749,7 +832,7 @@ const splitOrder = async (req, res) => {
       data: {
         originalOrder: {
           id: originalOrder._id,
-          items: updatedItemOrders.map(item => ({
+          items: updatedItemOrders.map((item) => ({
             item_id: item.item_id,
             quantity: item.quantity,
             size: item.size,
@@ -759,7 +842,7 @@ const splitOrder = async (req, res) => {
         },
         newOrder: {
           id: newOrder._id,
-          items: newItemOrders.map(item => ({
+          items: newItemOrders.map((item) => ({
             item_id: item.item_id,
             quantity: item.quantity,
             size: item.size,
@@ -799,8 +882,12 @@ const mergeOrder = async (req, res) => {
     }
 
     // Lấy thông tin đơn hàng
-    const sourceOrder = await OrderDetail.findById(source_order_id).session(session);
-    const targetOrder = await OrderDetail.findById(target_order_id).session(session);
+    const sourceOrder = await OrderDetail.findById(source_order_id).session(
+      session
+    );
+    const targetOrder = await OrderDetail.findById(target_order_id).session(
+      session
+    );
 
     if (!sourceOrder) {
       throw new Error("Không tìm thấy đơn hàng nguồn");
@@ -811,18 +898,26 @@ const mergeOrder = async (req, res) => {
 
     // Kiểm tra trạng thái và type
     if (!["pending", "confirmed"].includes(sourceOrder.status)) {
-      throw new Error("Chỉ có thể gộp đơn hàng ở trạng thái pending hoặc confirmed");
+      throw new Error(
+        "Chỉ có thể gộp đơn hàng ở trạng thái pending hoặc confirmed"
+      );
     }
     if (!["pending", "confirmed"].includes(targetOrder.status)) {
-      throw new Error("Chỉ có thể gộp vào đơn hàng ở trạng thái pending hoặc confirmed");
+      throw new Error(
+        "Chỉ có thể gộp vào đơn hàng ở trạng thái pending hoặc confirmed"
+      );
     }
     if (sourceOrder.type !== targetOrder.type) {
       throw new Error("Đơn hàng nguồn và đích phải có cùng type");
     }
 
     // Lấy danh sách món ăn
-    const sourceItemOrders = await ItemOrder.find({ order_id: sourceOrder._id }).session(session);
-    const targetItemOrders = await ItemOrder.find({ order_id: targetOrder._id }).session(session);
+    const sourceItemOrders = await ItemOrder.find({
+      order_id: sourceOrder._id,
+    }).session(session);
+    const targetItemOrders = await ItemOrder.find({
+      order_id: targetOrder._id,
+    }).session(session);
 
     // Gộp món ăn
     const itemMap = new Map();
@@ -841,7 +936,9 @@ const mergeOrder = async (req, res) => {
       if (itemMap.has(key)) {
         itemMap.get(key).quantity += item.quantity;
         if (item.note && item.note !== itemMap.get(key).note) {
-          itemMap.get(key).note = `${itemMap.get(key).note ? itemMap.get(key).note + "; " : ""}${item.note}`;
+          itemMap.get(key).note = `${
+            itemMap.get(key).note ? itemMap.get(key).note + "; " : ""
+          }${item.note}`;
         }
       } else {
         itemMap.set(key, {
@@ -877,7 +974,9 @@ const mergeOrder = async (req, res) => {
 
     // Xóa đơn nguồn và các bản ghi liên quan
     await ItemOrder.deleteMany({ order_id: sourceOrder._id }).session(session);
-    await ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(session);
+    await ReservedTable.deleteMany({ reservation_id: sourceOrder._id }).session(
+      session
+    );
     await OrderDetail.deleteOne({ _id: sourceOrder._id }, { session });
 
     // Cập nhật thời gian đơn đích
@@ -891,7 +990,10 @@ const mergeOrder = async (req, res) => {
     const enrichedItemOrders = await Promise.all(
       newItemOrders.map(async (itemOrder) => {
         const item = await Item.findById(itemOrder.item_id); // Không cần session
-        const sizeInfo = item && itemOrder.size && item.sizes ? item.sizes.find((s) => s.name === itemOrder.size) : null;
+        const sizeInfo =
+          item && itemOrder.size && item.sizes
+            ? item.sizes.find((s) => s.name === itemOrder.size)
+            : null;
         return {
           item_id: itemOrder.item_id,
           quantity: itemOrder.quantity,
@@ -904,7 +1006,9 @@ const mergeOrder = async (req, res) => {
       })
     );
 
-    const reservedTables = await ReservedTable.find({ reservation_id: targetOrder._id }).lean();
+    const reservedTables = await ReservedTable.find({
+      reservation_id: targetOrder._id,
+    }).lean();
     const tableIds = reservedTables.map((rt) => rt.table_id);
     const tablesInfo = await TableInfo.find({ _id: { $in: tableIds } }).lean();
     const tablesWithStatus = tablesInfo.map((table) => ({
@@ -913,8 +1017,12 @@ const mergeOrder = async (req, res) => {
       area: table.area,
       capacity: table.capacity,
       status: targetOrder.status === "pending" ? "Reserved" : "Occupied",
-      start_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.start_time || null,
-      end_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time || null,
+      start_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))
+          ?.start_time || null,
+      end_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time ||
+        null,
     }));
 
     // Chuẩn bị response
@@ -963,7 +1071,11 @@ const mergeOrder = async (req, res) => {
     setImmediate(async () => {
       try {
         const user = await getUserByUserId(targetOrder.customer_id);
-        await emailService.sendOrderConfirmationEmail(user.email, user.name, targetOrder);
+        await emailService.sendOrderConfirmationEmail(
+          user.email,
+          user.name,
+          targetOrder
+        );
       } catch (emailError) {
         console.error("Error sending email:", emailError.message);
       }
@@ -982,10 +1094,25 @@ const mergeOrder = async (req, res) => {
   }
 };
 
+function sortObject(obj) {
+  let sorted = {};
+  let str = [];
+  let key;
+  for (key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      str.push(encodeURIComponent(key));
+    }
+  }
+  str.sort();
+  for (key = 0; key < str.length; key++) {
+    sorted[str[key]] = encodeURIComponent(obj[str[key]]).replace(/%20/g, "+");
+  }
+  return sorted;
+}
 
 const createPayment = async (req, res) => {
   try {
-    const { order_id, amount, order_desc, bank_code, language, txtexpire } = req.body;
+    const { order_id, bank_code, language, txtexpire } = req.body;
 
     // Kiểm tra đầu vào
     if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
@@ -995,16 +1122,16 @@ const createPayment = async (req, res) => {
         data: null,
       });
     }
-    if (!amount || isNaN(amount) || amount <= 0) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Valid amount is required!",
-        data: null,
-      });
+
+    // Kiểm tra cấu hình VNPAY
+    const vnp_TmnCode = process.env.VNPAY_TMN_CODE;
+    const vnp_HashSecret = process.env.VNPAY_HASH_SECRET;
+    if (!vnp_TmnCode || !vnp_HashSecret) {
+      throw new Error("VNPAY configuration is missing");
     }
 
     // Kiểm tra đơn hàng
-    const order = await OrderDetail.findById(order_id);
+    const order = await mongoose.model("OrderDetail").findById(order_id);
     if (!order) {
       return res.status(404).json({
         status: "ERROR",
@@ -1019,24 +1146,92 @@ const createPayment = async (req, res) => {
         data: null,
       });
     }
+    if (order.payment_status === "success") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Order has already been paid!",
+        data: null,
+      });
+    }
+
+    // Tính total_amount từ ItemOrder (giả sử có hàm này)
+    const total_amount = await calculateOrderTotal(order_id);
+    if (total_amount <= 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Order has no valid items or total amount is zero!",
+        data: null,
+      });
+    }
+
+    let discount_amount = 0;
+    let final_amount = total_amount;
+
+    // Xử lý voucher
+    if (order.voucher_id) {
+      const voucher = await mongoose
+        .model("Voucher")
+        .findById(order.voucher_id);
+      if (!voucher) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: "Voucher not found!",
+          data: null,
+        });
+      }
+      if (voucher.discountType === "percentage") {
+        discount_amount = (voucher.discount / 100) * total_amount;
+      } else {
+        discount_amount = voucher.discount;
+      }
+      final_amount = total_amount - discount_amount;
+      if (final_amount < 0) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: "Final amount cannot be negative!",
+          data: null,
+        });
+      }
+    }
+
+    // Cập nhật OrderDetail
+    await mongoose.model("OrderDetail").findByIdAndUpdate(order_id, {
+      total_amount,
+      discount_amount,
+      final_amount,
+      payment_method: "vnpay",
+    });
 
     // Cấu hình VNPay
-    const vnp_Url = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-    const vnp_TmnCode = process.env.VNPAY_TMN_CODE;
-    const vnp_HashSecret = process.env.VNPAY_HASH_SECRET;
-    const vnp_ReturnUrl = process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
-    const vnp_CreateDate = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
-    const vnp_TxnRef = order_id; // Sử dụng order_id làm mã giao dịch
-    const vnp_Amount = amount * 100; // Nhân 100 theo yêu cầu VNPay
-    const vnp_IpAddr = req.ip || "127.0.0.1";
+    process.env.TZ = "Asia/Ho_Chi_Minh";
+    const vnp_Url =
+      process.env.VNPAY_URL ||
+      "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+    const vnp_ReturnUrl =
+      process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
+    const vnp_CreateDate = moment(new Date()).format("YYYYMMDDHHmmss");
+    const vnp_TxnRef = order_id;
+    const vnp_Amount = final_amount * 100; // VNPay yêu cầu nhân 100
+    const vnp_IpAddr = req.headers["x-forwarded-for"] || req.ip || "127.0.0.1";
     const vnp_Locale = language || "vn";
     const vnp_CurrCode = "VND";
-    const vnp_OrderInfo = order_desc || `Thanh toan don hang ${order_id}`;
-    const vnp_OrderType = "other"; // Có thể cấu hình theo danh mục hàng hóa
-    const vnp_ExpireDate = txtexpire || new Date(Date.now() + 15 * 60 * 1000).toISOString().replace(/[-:T.]/g, "").slice(0, 14); // Hết hạn sau 15 phút
+    const vnp_OrderInfo = `Thanh toan don hang ${order_id}`.replace(
+      /[^a-zA-Z0-9 ]/g,
+      ""
+    );
+    const vnp_OrderType = "other";
+    const vnp_ExpireDate =
+      txtexpire ||
+      moment(new Date()).add(30, "minutes").format("YYYYMMDDHHmmss"); // Tăng lên 30 phút
+
+    // Lưu thông tin giao dịch
+    await mongoose.model("OrderDetail").findByIdAndUpdate(order_id, {
+      transaction_id: vnp_TxnRef,
+      payment_initiated_at: new Date(),
+    });
 
     // Tạo params
-    const params = {
+    let vnp_Params = {
       vnp_Version: "2.1.0",
       vnp_Command: "pay",
       vnp_TmnCode,
@@ -1052,38 +1247,35 @@ const createPayment = async (req, res) => {
       vnp_ExpireDate,
     };
 
-    if (bank_code) {
-      params.vnp_BankCode = bank_code;
+    if (bank_code && ["VNPAYQR", "VNBANK", "INTCARD"].includes(bank_code)) {
+      vnp_Params.vnp_BankCode = bank_code;
     }
 
-    // Sắp xếp params theo thứ tự alphabet
-    const sortedParams = Object.keys(params)
-      .sort()
-      .reduce((obj, key) => {
-        obj[key] = params[key];
-        return obj;
-      }, {});
-
-    // Tạo chuỗi hash
-    const signData = querystring.stringify(sortedParams);
+    // Sắp xếp và tạo chữ ký
+    vnp_Params = sortObject(vnp_Params);
+    const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", vnp_HashSecret);
-    const vnp_SecureHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const vnp_SecureHash = hmac
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
+    vnp_Params.vnp_SecureHash = vnp_SecureHash;
 
-    // Thêm secure hash vào params
-    sortedParams.vnp_SecureHash = vnp_SecureHash;
+    // Tạo URL
+    const vnpUrl = `${vnp_Url}?${qs.stringify(vnp_Params, { encode: false })}`;
 
-    // Tạo URL thanh toán
-    const vnpUrl = `${vnp_Url}?${querystring.stringify(sortedParams)}`;
-
+    console.log(
+      `Creating payment for order ${order_id}: signData=${signData}, vnp_SecureHash=${vnp_SecureHash}`
+    );
     return res.status(200).json({
       status: "SUCCESS",
       message: "Payment URL created successfully!",
       data: { vnpUrl },
     });
   } catch (error) {
+    console.error("Error in createPayment:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "An error occurred while creating payment URL!",
+      message: error.message || "An error occurred while creating payment!",
       data: null,
     });
   }
@@ -1091,40 +1283,72 @@ const createPayment = async (req, res) => {
 
 const handlePaymentReturn = async (req, res) => {
   try {
-    const vnp_Params = req.query;
+    let vnp_Params = req.query;
     const vnp_SecureHash = vnp_Params.vnp_SecureHash;
     delete vnp_Params.vnp_SecureHash;
     delete vnp_Params.vnp_SecureHashType;
 
-    // Sắp xếp params để kiểm tra hash
-    const sortedParams = Object.keys(vnp_Params)
-      .sort()
-      .reduce((obj, key) => {
-        obj[key] = vnp_Params[key];
-        return obj;
-      }, {});
-    const signData = querystring.stringify(sortedParams);
+    // Sắp xếp và tạo chữ ký
+    vnp_Params = sortObject(vnp_Params);
+    const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const calculatedHash = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+
+    console.log(`Return signData: ${signData}`);
+    console.log(`Return vnp_SecureHash: ${vnp_SecureHash}`);
+    console.log(`Return calculatedHash: ${calculatedHash}`);
 
     const order_id = vnp_Params.vnp_TxnRef;
     const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
 
-    // Kiểm tra checksum
-    if (calculatedHash !== vnp_SecureHash) {
-      return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Invalid secure hash`);
+    // Kiểm tra đơn hàng
+    const order = await mongoose.model("OrderDetail").findById(order_id);
+    if (!order) {
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent('Order not found')}`
+      );
     }
 
-    // Kiểm tra trạng thái giao dịch
+    // Kiểm tra chữ ký
+    if (calculatedHash !== vnp_SecureHash) {
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent('Sai chữ ký (Checksum failed)')}`
+      );
+    }
+
+    // Thông báo kết quả
+    const errorMessages = {
+      "00": "Giao dịch thành công",
+      "07": "Giao dịch bị nghi ngờ gian lận",
+      "09": "Thẻ/Tài khoản chưa đăng ký Internet Banking",
+      "10": "Xác thực thẻ/tài khoản không đúng quá 3 lần",
+      "11": "Hết hạn chờ thanh toán",
+      "12": "Thẻ/Tài khoản bị khóa",
+      "13": "Sai OTP",
+      "24": "Khách hàng hủy giao dịch",
+      "51": "Tài khoản không đủ số dư",
+      "65": "Vượt hạn mức giao dịch trong ngày",
+      "75": "Ngân hàng đang bảo trì",
+      "79": "Sai mật khẩu thanh toán quá số lần",
+      "97": "Sai chữ ký",
+      "99": "Lỗi không xác định",
+    };
+
+    const message = errorMessages[vnp_ResponseCode] || `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
     if (vnp_ResponseCode === "00") {
-      return res.redirect(`${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}`);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}&message=${encodeURIComponent(message)}`
+      );
     } else {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=Transaction failed with code ${vnp_ResponseCode}`
+        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(message)}`
       );
     }
   } catch (error) {
-    return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Error processing payment`);
+    console.error(`Error in handlePaymentReturn for order ${req.query.vnp_TxnRef}:`, error);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent('Error processing payment')}`
+    );
   }
 };
 
@@ -1132,98 +1356,95 @@ const handlePaymentIPN = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const vnp_Params = req.query;
+    let vnp_Params = req.query;
     const vnp_SecureHash = vnp_Params.vnp_SecureHash;
-    delete vnp_Params.vnp_SecureHash;
-    delete vnp_Params.vnp_SecureHashType;
-
-    // Sắp xếp params để kiểm tra hash
-    const sortedParams = Object.keys(vnp_Params)
-      .sort()
-      .reduce((obj, key) => {
-        obj[key] = vnp_Params[key];
-        return obj;
-      }, {});
-    const signData = querystring.stringify(sortedParams);
-    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
-
     const order_id = vnp_Params.vnp_TxnRef;
-    const vnp_Amount = parseInt(vnp_Params.vnp_Amount) / 100; // Chia 100 để lấy số tiền gốc
+    const vnp_Amount = parseInt(vnp_Params.vnp_Amount) / 100;
     const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
     const vnp_TransactionStatus = vnp_Params.vnp_TransactionStatus;
     const vnp_TransactionNo = vnp_Params.vnp_TransactionNo;
 
-    // Kiểm tra checksum
+    delete vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHashType;
+
+    // Sắp xếp và tạo chữ ký
+    vnp_Params = sortObject(vnp_Params);
+    const signData = qs.stringify(vnp_Params, { encode: false });
+    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
+    const calculatedHash = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+
+    console.log(`IPN signData: ${signData}`);
+    console.log(`IPN vnp_SecureHash: ${vnp_SecureHash}`);
+    console.log(`IPN calculatedHash: ${calculatedHash}`);
+
+    // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
       await session.abortTransaction();
-      session.endSession();
-      return res.json({ RspCode: "97", Message: "Invalid signature" });
+      console.error(`Invalid signature for IPN, order ${order_id}`);
+      return res.status(200).json({ RspCode: "97", Message: "Checksum failed" });
     }
 
     // Kiểm tra đơn hàng
-    const order = await OrderDetail.findById(order_id).session(session);
+    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
     if (!order) {
       await session.abortTransaction();
-      session.endSession();
-      return res.json({ RspCode: "01", Message: "Order not found" });
+      console.error(`Order not found for IPN, order ${order_id}`);
+      return res.status(200).json({ RspCode: "01", Message: "Order not found" });
     }
 
     // Kiểm tra số tiền
-    const orderItems = await ItemOrder.find({ order_id: order._id }).session(session);
-    const items = await Item.find({ _id: { $in: orderItems.map((i) => i.item_id) } }).session(session);
-    const itemMap = new Map(items.map((item) => [item._id.toString(), item]));
-    let totalAmount = 0;
-    for (const itemOrder of orderItems) {
-      const item = itemMap.get(itemOrder.item_id.toString());
-      const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find((s) => s.name === itemOrder.size) : null;
-      totalAmount += (sizeInfo ? sizeInfo.price : item.price) * itemOrder.quantity;
-    }
-    if (totalAmount !== vnp_Amount) {
+    if (order.final_amount !== vnp_Amount) {
       await session.abortTransaction();
-      session.endSession();
-      return res.json({ RspCode: "04", Message: "Invalid amount" });
+      console.error(`Invalid amount for IPN, order ${order_id}: expected ${order.final_amount}, got ${vnp_Amount}`);
+      return res.status(200).json({ RspCode: "04", Message: "Invalid amount" });
     }
 
-    // Kiểm tra trạng thái đơn hàng
-    if (order.status === "completed") {
+    // Kiểm tra trạng thái
+    if (order.payment_status === "success" || order.status === "completed") {
       await session.abortTransaction();
-      session.endSession();
-      return res.json({ RspCode: "02", Message: "Order already confirmed" });
+      console.log(`Order already processed for IPN, order ${order_id}`);
+      return res.status(200).json({ RspCode: "02", Message: "Order already confirmed" });
     }
 
-    // Cập nhật trạng thái đơn hàng
+    // Cập nhật trạng thái
     if (vnp_ResponseCode === "00" && vnp_TransactionStatus === "00") {
-      order.status = "completed";
-      order.transaction_id = vnp_TransactionNo; // Lưu mã giao dịch
-      await order.save({ session });
+      await mongoose.model("OrderDetail").findByIdAndUpdate(
+        order_id,
+        {
+          status: "completed",
+          payment_status: "success",
+          vnp_transaction_no: vnp_TransactionNo,
+        },
+        { session }
+      );
 
-      // Gửi email xác nhận (bất đồng bộ)
-      setImmediate(async () => {
-        try {
-          const user = await getUserByUserId(order.customer_id);
-          await emailService.sendOrderConfirmationEmail(user.email, user.name, {
-            ...order.toObject(),
-            transactionNo: vnp_TransactionNo,
-          });
-        } catch (emailError) {
-          console.error("Error sending email:", emailError.message);
-        }
-      });
+      if (order.voucher_id) {
+        await mongoose.model("Voucher").findByIdAndUpdate(
+          order.voucher_id,
+          { $inc: { usedCount: 1 } },
+          { session }
+        );
+      }
     } else {
-      // Giao dịch thất bại
-      await session.abortTransaction();
-      session.endSession();
-      return res.json({ RspCode: "00", Message: "Confirm Success" }); // Vẫn trả về 00 để VNPay không retry
+      await mongoose.model("OrderDetail").findByIdAndUpdate(
+        order_id,
+        {
+          payment_status: "failed",
+          vnp_transaction_no: vnp_TransactionNo,
+        },
+        { session }
+      );
     }
 
     await session.commitTransaction();
-    session.endSession();
-    return res.json({ RspCode: "00", Message: "Confirm Success" });
+    console.log(`IPN processed successfully for order ${order_id}, responseCode=${vnp_ResponseCode}`);
+    return res.status(200).json({ RspCode: "00", Message: "Success" });
   } catch (error) {
+    console.error(`Error in handlePaymentIPN for order ${req.query.vnp_TxnRef}:`, error);
     await session.abortTransaction();
+    return res.status(200).json({ RspCode: "99", Message: "Unknown error" });
+  } finally {
     session.endSession();
-    return res.json({ RspCode: "99", Message: "Unknown error" });
   }
 };
 
@@ -1267,9 +1488,13 @@ const addItemsToOrder = async (req, res) => {
     }
 
     // Kiểm tra món ăn
-    const itemIds = items.map(item => new mongoose.Types.ObjectId(item.id));
-    const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
-    const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+    const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
+    const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+      session
+    );
+    const itemMap = new Map(
+      foundItems.map((item) => [item._id.toString(), item])
+    );
 
     for (const item of items) {
       if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
@@ -1283,17 +1508,24 @@ const addItemsToOrder = async (req, res) => {
         throw new Error(`Item with ID ${item.id} not found!`);
       }
       if (item.size) {
-        const validSize = itemExists.sizes.find(s => s.name === item.size);
+        const validSize = itemExists.sizes.find((s) => s.name === item.size);
         if (!validSize) {
-          throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
+          throw new Error(
+            `Invalid size ${item.size} for item ${itemExists.name}!`
+          );
         }
       }
     }
 
     // Lấy danh sách món hiện có trong đơn hàng
-    const existingItemOrders = await ItemOrder.find({ order_id: order._id }).session(session);
+    const existingItemOrders = await ItemOrder.find({
+      order_id: order._id,
+    }).session(session);
     const itemOrderMap = new Map(
-      existingItemOrders.map(io => [`${io.item_id}-${io.size || "default"}`, io])
+      existingItemOrders.map((io) => [
+        `${io.item_id}-${io.size || "default"}`,
+        io,
+      ])
     );
 
     const newItemOrders = [];
@@ -1325,12 +1557,15 @@ const addItemsToOrder = async (req, res) => {
     }
 
     // Giữ các món không bị ảnh hưởng
-    itemOrderMap.forEach(io => updatedItemOrders.push(io.toObject()));
+    itemOrderMap.forEach((io) => updatedItemOrders.push(io.toObject()));
 
     // Xóa các món cũ và tạo lại
     await ItemOrder.deleteMany({ order_id: order._id }).session(session);
     if (updatedItemOrders.length > 0) {
-      await orderService.createItemOrders(updatedItemOrders.concat(newItemOrders), { session });
+      await orderService.createItemOrders(
+        updatedItemOrders.concat(newItemOrders),
+        { session }
+      );
     }
 
     // Cập nhật thời gian đơn hàng
@@ -1340,11 +1575,18 @@ const addItemsToOrder = async (req, res) => {
     await session.commitTransaction();
 
     // Lấy thông tin chi tiết món để trả về
-    const allItemOrders = await ItemOrder.find({ order_id: order._id }).session(null); // Không cần session sau commit
+    const allItemOrders = await ItemOrder.find({ order_id: order._id }).session(
+      null
+    ); // Không cần session sau commit
     const enrichedItemOrders = await Promise.all(
-      allItemOrders.map(async itemOrder => {
-        const item = itemMap.get(itemOrder.item_id.toString()) || (await Item.findById(itemOrder.item_id));
-        const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find(s => s.name === itemOrder.size) : null;
+      allItemOrders.map(async (itemOrder) => {
+        const item =
+          itemMap.get(itemOrder.item_id.toString()) ||
+          (await Item.findById(itemOrder.item_id));
+        const sizeInfo =
+          itemOrder.size && item.sizes
+            ? item.sizes.find((s) => s.name === itemOrder.size)
+            : null;
         return {
           _id: itemOrder._id,
           item_id: itemOrder.item_id,
@@ -1371,11 +1613,16 @@ const addItemsToOrder = async (req, res) => {
           time: order.time.toISOString(),
           createdAt: new Date().toISOString(),
           message: `Items added to order ${order._id}: ${items
-            .map(i => `${i.quantity} x ${itemMap.get(i.id)?.name || i.id}${i.size ? ` (${i.size})` : ""}`)
+            .map(
+              (i) =>
+                `${i.quantity} x ${itemMap.get(i.id)?.name || i.id}${
+                  i.size ? ` (${i.size})` : ""
+                }`
+            )
             .join(", ")}`,
           items: enrichedItemOrders,
         };
-        adminSockets.forEach(socket => {
+        adminSockets.forEach((socket) => {
           socket.emit("orderItemsUpdate", notification); // Sử dụng event riêng để phân biệt
         });
       } catch (error) {
@@ -1395,7 +1642,8 @@ const addItemsToOrder = async (req, res) => {
     await session.abortTransaction();
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "An error occurred while adding items to order!",
+      message:
+        error.message || "An error occurred while adding items to order!",
       data: null,
     });
   } finally {
@@ -1443,13 +1691,24 @@ const cancelItems = async (req, res) => {
     }
 
     // Kiểm tra món ăn
-    const itemIds = items.map(item => new mongoose.Types.ObjectId(item.item_id));
-    const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
-    const itemMap = new Map(foundItems.map(item => [item._id.toString(), item]));
+    const itemIds = items.map(
+      (item) => new mongoose.Types.ObjectId(item.item_id)
+    );
+    const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+      session
+    );
+    const itemMap = new Map(
+      foundItems.map((item) => [item._id.toString(), item])
+    );
 
-    const existingItemOrders = await ItemOrder.find({ order_id: order._id }).session(session);
+    const existingItemOrders = await ItemOrder.find({
+      order_id: order._id,
+    }).session(session);
     const itemOrderMap = new Map(
-      existingItemOrders.map(io => [`${io.item_id}-${io.size || "default"}`, io])
+      existingItemOrders.map((io) => [
+        `${io.item_id}-${io.size || "default"}`,
+        io,
+      ])
     );
 
     const canceledItemOrders = [];
@@ -1467,16 +1726,22 @@ const cancelItems = async (req, res) => {
         throw new Error(`Item with ID ${item.item_id} not found!`);
       }
       if (item.size) {
-        const validSize = itemExists.sizes.find(s => s.name === item.size);
+        const validSize = itemExists.sizes.find((s) => s.name === item.size);
         if (!validSize) {
-          throw new Error(`Invalid size ${item.size} for item ${itemExists.name}!`);
+          throw new Error(
+            `Invalid size ${item.size} for item ${itemExists.name}!`
+          );
         }
       }
 
       const key = `${item.item_id}-${item.size || "default"}`;
       const existingItemOrder = itemOrderMap.get(key);
       if (!existingItemOrder) {
-        throw new Error(`Item ${itemExists.name} (size: ${item.size || "default"}) not found in order!`);
+        throw new Error(
+          `Item ${itemExists.name} (size: ${
+            item.size || "default"
+          }) not found in order!`
+        );
       }
       if (item.quantity > existingItemOrder.quantity) {
         throw new Error(
@@ -1507,7 +1772,7 @@ const cancelItems = async (req, res) => {
     }
 
     // Giữ các món không bị ảnh hưởng
-    itemOrderMap.forEach(io => updatedItemOrders.push(io.toObject()));
+    itemOrderMap.forEach((io) => updatedItemOrders.push(io.toObject()));
 
     // Xóa các món cũ và tạo lại
     await ItemOrder.deleteMany({ order_id: order._id }).session(session);
@@ -1516,7 +1781,10 @@ const cancelItems = async (req, res) => {
     }
 
     // Lưu các món đã hủy
-    const createdCanceledItems = await CanceledItemOrder.insertMany(canceledItemOrders, { session });
+    const createdCanceledItems = await CanceledItemOrder.insertMany(
+      canceledItemOrders,
+      { session }
+    );
 
     // Cập nhật thời gian đơn hàng
     order.updated_at = new Date();
@@ -1526,9 +1794,14 @@ const cancelItems = async (req, res) => {
 
     // Lấy thông tin chi tiết món hủy
     const enrichedCanceledItems = await Promise.all(
-      createdCanceledItems.map(async itemOrder => {
-        const item = itemMap.get(itemOrder.item_id.toString()) || (await Item.findById(itemOrder.item_id));
-        const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find(s => s.name === itemOrder.size) : null;
+      createdCanceledItems.map(async (itemOrder) => {
+        const item =
+          itemMap.get(itemOrder.item_id.toString()) ||
+          (await Item.findById(itemOrder.item_id));
+        const sizeInfo =
+          itemOrder.size && item.sizes
+            ? item.sizes.find((s) => s.name === itemOrder.size)
+            : null;
         return {
           _id: itemOrder._id,
           item_id: itemOrder.item_id,
@@ -1546,11 +1819,18 @@ const cancelItems = async (req, res) => {
     );
 
     // Lấy danh sách món còn lại để trả về
-    const remainingItemOrders = await ItemOrder.find({ order_id: order._id }).session(null);
+    const remainingItemOrders = await ItemOrder.find({
+      order_id: order._id,
+    }).session(null);
     const enrichedRemainingItems = await Promise.all(
-      remainingItemOrders.map(async itemOrder => {
-        const item = itemMap.get(itemOrder.item_id.toString()) || (await Item.findById(itemOrder.item_id));
-        const sizeInfo = itemOrder.size && item.sizes ? item.sizes.find(s => s.name === itemOrder.size) : null;
+      remainingItemOrders.map(async (itemOrder) => {
+        const item =
+          itemMap.get(itemOrder.item_id.toString()) ||
+          (await Item.findById(itemOrder.item_id));
+        const sizeInfo =
+          itemOrder.size && item.sizes
+            ? item.sizes.find((s) => s.name === itemOrder.size)
+            : null;
         return {
           _id: itemOrder._id,
           item_id: itemOrder.item_id,
@@ -1577,12 +1857,17 @@ const cancelItems = async (req, res) => {
           time: order.time.toISOString(),
           createdAt: new Date().toISOString(),
           message: `Items canceled in order ${order._id}: ${items
-            .map(i => `${i.quantity} x ${itemMap.get(i.item_id)?.name || i.item_id}${i.size ? ` (${i.size})` : ""}`)
+            .map(
+              (i) =>
+                `${i.quantity} x ${itemMap.get(i.item_id)?.name || i.item_id}${
+                  i.size ? ` (${i.size})` : ""
+                }`
+            )
             .join(", ")}`,
           canceledItems: enrichedCanceledItems,
           remainingItems: enrichedRemainingItems,
         };
-        adminSockets.forEach(socket => {
+        adminSockets.forEach((socket) => {
           socket.emit("orderItemsUpdate", notification);
         });
       } catch (error) {

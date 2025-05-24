@@ -242,8 +242,8 @@ const releaseTable = async (req, res) => {
       });
     }
 
-    reservationTable.end_time = new Date();
-    await reservationTable.save();
+    // Xóa bản ghi đặt chỗ thay vì cập nhật end_time
+    await ReservedTable.deleteOne({ reservation_id, table_id });
 
     const tableInfo = await TableInfo.findById(table_id).lean();
     if (!tableInfo) {
@@ -259,11 +259,10 @@ const releaseTable = async (req, res) => {
       message: 'Bàn đã được trả thành công!',
       data: {
         table_id: tableInfo._id,
+        table_number: tableInfo.table_number,
         capacity: tableInfo.capacity,
         area: tableInfo.area,
         status: 'Available',
-        start_time: reservationTable.start_time,
-        end_time: reservationTable.end_time,
       },
     });
   } catch (error) {
@@ -275,7 +274,6 @@ const releaseTable = async (req, res) => {
     });
   }
 };
-
 const getAvailableTables = async (req, res) => {
   try {
     const { start_time, end_time } = req.query;

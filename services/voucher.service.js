@@ -167,24 +167,29 @@ async function removeUsersFromVoucher(voucherId, userIds) {
 
 async function calculateOrderTotal(orderId) {
   try {
-    const itemOrders = await ItemOrder.find({ order_id: orderId }).populate(
-      "item_id"
-    );
-    if (!itemOrders.length) throw new Error("Đơn hàng không có sản phẩm");
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      throw new Error('Invalid order ID');
+    }
 
-    const totalAmount = itemOrders.reduce((total, itemOrder) => {
+    const itemOrders = await ItemOrder.find({ order_id: orderId }).populate('item_id');
+    console.log(`Found ${itemOrders.length} itemOrders for order ${orderId}`);
+    if (!itemOrders.length) throw new Error('Đơn hàng không có sản phẩm');
+
+    const totalAmount = itemOrders.reduce((total, itemOrder, index) => {
       if (!itemOrder.item_id) {
-        throw new Error("Sản phẩm không hợp lệ");
+        console.warn(`ItemOrder ${itemOrder._id} (index ${index}) has invalid item_id`);
+        throw new Error(`Sản phẩm không hợp lệ cho ItemOrder ${itemOrder._id}`);
       }
 
       let price = itemOrder.item_id.price; // Giá mặc định
 
-      // Nếu có size được chọn, tìm giá tương ứng trong item_id.sizes
+      // Nếu có size được chọn, tìm giá tương ứng
       if (itemOrder.size) {
         const selectedSize = itemOrder.item_id.sizes.find(
           (size) => size.name.toLowerCase() === itemOrder.size.toLowerCase()
         );
         if (!selectedSize) {
+          console.warn(`ItemOrder ${itemOrder._id} (index ${index}): Invalid size ${itemOrder.size} for item ${itemOrder.item_id.name}`);
           throw new Error(
             `Kích thước ${itemOrder.size} không hợp lệ cho sản phẩm ${itemOrder.item_id.name}`
           );
@@ -194,48 +199,63 @@ async function calculateOrderTotal(orderId) {
 
       // Kiểm tra giá hợp lệ
       if (!price && price !== 0) {
+        console.warn(`ItemOrder ${itemOrder._id} (index ${index}): No price for item ${itemOrder.item_id.name}`);
         throw new Error(`Sản phẩm ${itemOrder.item_id.name} thiếu giá`);
       }
 
-      return total + itemOrder.quantity * price;
+      const itemTotal = itemOrder.quantity * price;
+      console.log(`ItemOrder ${itemOrder._id} (index ${index}): Item: ${itemOrder.item_id.name}, Size: ${itemOrder.size || 'none'}, Price: ${price}, Quantity: ${itemOrder.quantity}, Total: ${itemTotal}`);
+
+      return total + itemTotal;
     }, 0);
+
+    console.log(`Total amount for order ${orderId}: ${totalAmount}`);
+    if (totalAmount <= 0) {
+      throw new Error('Tổng giá trị đơn hàng phải lớn hơn 0');
+    }
+
+    // Cập nhật total_amount vào OrderDetail
+    await OrderDetail.findByIdAndUpdate(
+      orderId,
+      { total_amount: totalAmount },
+      { new: true }
+    );
+    console.log(`Updated total_amount=${totalAmount} for order ${orderId}`);
 
     return totalAmount;
   } catch (error) {
-    console.error("Error calculating order total:", error);
-    throw new Error(error.message || "Lỗi khi tính tổng giá trị đơn hàng");
+    console.error('Error calculating order total:', error);
+    throw new Error(error.message || 'Lỗi khi tính tổng giá trị đơn hàng');
   }
 }
 
 async function applyVoucher(orderId, voucherCode) {
   try {
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      throw new Error('Invalid order ID');
+    }
+
     // Kiểm tra đơn hàng
     const order = await OrderDetail.findById(orderId);
-    if (!order) throw new Error("Đơn hàng không tồn tại");
+    if (!order) throw new Error('Đơn hàng không tồn tại');
 
     // Kiểm tra voucher
-    const voucher = await Voucher.findOne({
-      code: voucherCode,
-      isActive: true,
-    });
-    if (!voucher) throw new Error("Voucher không tồn tại hoặc không hoạt động");
+    const voucher = await Voucher.findOne({ code: voucherCode, isActive: true });
+    if (!voucher) throw new Error('Voucher không tồn tại hoặc không hoạt động');
 
     // Kiểm tra thời hạn
     const now = new Date();
     if (now < voucher.startDate || now > voucher.endDate) {
-      throw new Error("Voucher đã hết hạn hoặc chưa bắt đầu");
+      throw new Error('Voucher đã hết hạn hoặc chưa bắt đầu');
     }
 
     // Kiểm tra giới hạn sử dụng
-    if (
-      voucher.usageLimit !== null &&
-      voucher.usedCount >= voucher.usageLimit
-    ) {
-      throw new Error("Voucher đã hết lượt sử dụng");
+    if (voucher.usageLimit !== null && voucher.usedCount >= voucher.usageLimit) {
+      throw new Error('Voucher đã hết lượt sử dụng');
     }
 
     // Tính tổng giá trị đơn hàng
-    const totalAmount = await calculateOrderTotal(orderId);
+    const totalAmount = await calculateOrderTotal(orderId); // Đã cập nhật total_amount trong hàm này
 
     // Kiểm tra giá trị đơn hàng tối thiểu
     if (totalAmount < voucher.minOrderValue) {
@@ -246,13 +266,18 @@ async function applyVoucher(orderId, voucherCode) {
 
     // Tính chiết khấu
     let discountAmount = 0;
-    if (voucher.discountType === "percentage") {
+    if (voucher.discountType === 'percentage') {
       discountAmount = (voucher.discount / 100) * totalAmount;
     } else {
       discountAmount = voucher.discount;
     }
 
-    // Cập nhật voucher_id và thông tin chiết khấu vào đơn hàng, tăng usedCount
+    const finalAmount = totalAmount - discountAmount;
+    if (finalAmount < 0) {
+      throw new Error('Tổng tiền sau giảm giá không thể âm');
+    }
+
+    // Cập nhật OrderDetail và Voucher
     await Promise.all([
       OrderDetail.findByIdAndUpdate(
         orderId,
@@ -260,7 +285,7 @@ async function applyVoucher(orderId, voucherCode) {
           voucher_id: voucher._id,
           total_amount: totalAmount,
           discount_amount: discountAmount,
-          final_amount: totalAmount - discountAmount,
+          final_amount: finalAmount,
         },
         { new: true }
       ),
@@ -271,16 +296,18 @@ async function applyVoucher(orderId, voucherCode) {
       ),
     ]);
 
+    console.log(`Applied voucher ${voucherCode} for order ${orderId}: total_amount=${totalAmount}, discount_amount=${discountAmount}, final_amount=${finalAmount}`);
+
     return {
       voucherId: voucher._id,
       code: voucher.code,
       discountAmount,
       originalAmount: totalAmount,
-      finalAmount: totalAmount - discountAmount,
+      finalAmount,
     };
   } catch (error) {
-    console.error("Error applying voucher:", error);
-    throw new Error(error.message || "Lỗi khi áp dụng voucher");
+    console.error('Error applying voucher:', error);
+    throw new Error(error.message || 'Lỗi khi áp dụng voucher');
   }
 }
 
