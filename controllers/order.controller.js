@@ -1356,6 +1356,7 @@ const handlePaymentIPN = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
+    console.log('Starting IPN processing for request:', JSON.stringify(req.query));
     let vnp_Params = req.query;
     const vnp_SecureHash = vnp_Params.vnp_SecureHash;
     const order_id = vnp_Params.vnp_TxnRef;
@@ -1363,6 +1364,8 @@ const handlePaymentIPN = async (req, res) => {
     const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
     const vnp_TransactionStatus = vnp_Params.vnp_TransactionStatus;
     const vnp_TransactionNo = vnp_Params.vnp_TransactionNo;
+
+    console.log(`Extracted parameters: order_id=${order_id}, amount=${vnp_Amount}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}, transactionNo=${vnp_TransactionNo}`);
 
     delete vnp_Params.vnp_SecureHash;
     delete vnp_Params.vnp_SecureHashType;
@@ -1379,35 +1382,40 @@ const handlePaymentIPN = async (req, res) => {
 
     // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
+      console.error(`Invalid signature for IPN, order ${order_id}. Expected: ${calculatedHash}, Received: ${vnp_SecureHash}`);
       await session.abortTransaction();
-      console.error(`Invalid signature for IPN, order ${order_id}`);
       return res.status(200).json({ RspCode: "97", Message: "Checksum failed" });
     }
+    console.log(`Signature verification passed for order ${order_id}`);
 
     // Kiểm tra đơn hàng
     const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
     if (!order) {
-      await session.abortTransaction();
       console.error(`Order not found for IPN, order ${order_id}`);
+      await session.abortTransaction();
       return res.status(200).json({ RspCode: "01", Message: "Order not found" });
     }
+    console.log(`Order found: ${JSON.stringify(order)}`);
 
     // Kiểm tra số tiền
     if (order.final_amount !== vnp_Amount) {
-      await session.abortTransaction();
       console.error(`Invalid amount for IPN, order ${order_id}: expected ${order.final_amount}, got ${vnp_Amount}`);
+      await session.abortTransaction();
       return res.status(200).json({ RspCode: "04", Message: "Invalid amount" });
     }
+    console.log(`Amount verification passed for order ${order_id}`);
 
     // Kiểm tra trạng thái
     if (order.payment_status === "success" || order.status === "completed") {
+      console.log(`Order already processed for IPN, order ${order_id}, payment_status=${order.payment_status}, status=${order.status}`);
       await session.abortTransaction();
-      console.log(`Order already processed for IPN, order ${order_id}`);
       return res.status(200).json({ RspCode: "02", Message: "Order already confirmed" });
     }
+    console.log(`Order status check passed for order ${order_id}`);
 
     // Cập nhật trạng thái
     if (vnp_ResponseCode === "00" && vnp_TransactionStatus === "00") {
+      console.log(`Processing successful payment for order ${order_id}`);
       await mongoose.model("OrderDetail").findByIdAndUpdate(
         order_id,
         {
@@ -1419,6 +1427,7 @@ const handlePaymentIPN = async (req, res) => {
       );
 
       if (order.voucher_id) {
+        console.log(`Updating voucher usage for voucher_id ${order.voucher_id}`);
         await mongoose.model("Voucher").findByIdAndUpdate(
           order.voucher_id,
           { $inc: { usedCount: 1 } },
@@ -1426,6 +1435,7 @@ const handlePaymentIPN = async (req, res) => {
         );
       }
     } else {
+      console.log(`Processing failed payment for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}`);
       await mongoose.model("OrderDetail").findByIdAndUpdate(
         order_id,
         {
@@ -1437,13 +1447,17 @@ const handlePaymentIPN = async (req, res) => {
     }
 
     await session.commitTransaction();
-    console.log(`IPN processed successfully for order ${order_id}, responseCode=${vnp_ResponseCode}`);
+    console.log(`IPN processed successfully for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionNo=${vnp_TransactionNo}`);
     return res.status(200).json({ RspCode: "00", Message: "Success" });
   } catch (error) {
-    console.error(`Error in handlePaymentIPN for order ${req.query.vnp_TxnRef}:`, error);
+    console.error(`Error in handlePaymentIPN for order ${req.query.vnp_TxnRef}: ${error.message}`, {
+      stack: error.stack,
+      params: req.query
+    });
     await session.abortTransaction();
     return res.status(200).json({ RspCode: "99", Message: "Unknown error" });
   } finally {
+    console.log(`Ending session for IPN processing, order ${req.query.vnp_TxnRef}`);
     session.endSession();
   }
 };
