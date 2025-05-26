@@ -5,7 +5,8 @@ const { createServer } = require("node:http");
 const multer = require("multer");
 const session = require("express-session");
 const passport = require("passport");
-const socketModule = require("./socket/index.js");
+// const socketModule = require("./socket/index.js");
+const socket = require("./socket.js");
 
 // Khởi tạo Express app và HTTP server
 const app = express();
@@ -27,14 +28,16 @@ app.use(
     credentials: true,
   })
 );
+
+socket.initSocket(server)
 // Cấu hình CORS
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || true,
+  origin: process.env.FRONTEND_URL,
   methods: ["GET", "POST"],
 };
 
 // Khởi tạo Socket.IO
-socketModule.init(server, { cors: corsOptions });
+// socketModule.init(server, { cors: corsOptions });
 
 // Cấu hình session
 app.use(
@@ -60,51 +63,51 @@ app.get("/", (req, res) => {
 });
 
 // API thông tin về admin sockets
-app.get("/api/admin-sockets", (req, res) => {
-  const adminSockets = socketModule.getAdminSockets();
-  const connectedAdmins = Array.from(adminSockets.keys());
-  
-  res.json({
-    status: "SUCCESS",
-    message: "List of connected admin sockets",
-    data: {
-      count: connectedAdmins.length,
-      adminIds: connectedAdmins,
-    },
-  });
-});
+// app.get("/api/admin-sockets", (req, res) => {
+//   const adminSockets = socketModule.getAdminSockets();
+//   const connectedAdmins = Array.from(adminSockets.keys());
+
+//   res.json({
+//     status: "SUCCESS",
+//     message: "List of connected admin sockets",
+//     data: {
+//       count: connectedAdmins.length,
+//       adminIds: connectedAdmins,
+//     },
+//   });
+// });
 
 // API test thông báo đơn hàng mới
-app.post("/api/test-new-order", (req, res) => {
-  try {
-    const io = socketModule.getIO();
-    const notification = {
-      orderId: "test123",
-      customerId: "test789",
-      type: "reservation",
-      status: "pending",
-      staffId: null,
-      time: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      message: "Test new order notification",
-    };
+// app.post("/api/test-new-order", (req, res) => {
+//   try {
+//     const io = socketModule.getIO();
+//     const notification = {
+//       orderId: "test123",
+//       customerId: "test789",
+//       type: "reservation",
+//       status: "pending",
+//       staffId: null,
+//       time: new Date().toISOString(),
+//       createdAt: new Date().toISOString(),
+//       message: "Test new order notification",
+//     };
 
-    console.log("Sending newOrder notification to adminRoom:", notification);
-    console.log("Current adminRoom sockets:", io.sockets.adapter.rooms.get('adminRoom')?.size || 0);
-    io.to('adminRoom').emit("newOrder", notification);
+//     console.log("Sending newOrder notification to adminRoom:", notification);
+//     console.log("Current adminRoom sockets:", io.sockets.adapter.rooms.get('adminRoom')?.size || 0);
+//     io.to('adminRoom').emit("newOrder", notification);
 
-    res.json({
-      status: "SUCCESS",
-      message: "Test newOrder notification sent",
-      data: notification,
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "ERROR", 
-      message: error.message
-    });
-  }
-});
+//     res.json({
+//       status: "SUCCESS",
+//       message: "Test newOrder notification sent",
+//       data: notification,
+//     });
+//   } catch (error) {
+//     res.status(500).json({
+//       status: "ERROR",
+//       message: error.message
+//     });
+//   }
+// });
 
 // Import routes
 const connectDB = require("./config/db.config.js");

@@ -75,4 +75,5 @@ router.post(
   orderController.cancelItems
 );
 
+router.get("/test01", orderController.testNewOrder)
 module.exports = router;

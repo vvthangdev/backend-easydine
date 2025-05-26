@@ -8,15 +8,50 @@ const Voucher = require("../models/voucher.model");
 const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
-const { getIO } = require("../socket"); // Import io từ app.js
+const { getIO, getAdminSockets } = require("../socket");
 const socketOrderService = require("../socket/services/order");
 const { calculateOrderTotal } = require("../services/voucher.service");
 const moment = require("moment");
-const qs = require('qs')
+const qs = require("qs");
 
 const crypto = require("crypto");
-const querystring = require("querystring");
 const mongoose = require("mongoose");
+
+async function updateOrderAmounts(orderId, session) {
+  try {
+    const total_amount = await calculateOrderTotal(orderId, { session });
+    let discount_amount = 0;
+    let final_amount = total_amount;
+
+    const order = await OrderDetail.findById(orderId).session(session);
+    if (order.voucher_id) {
+      const voucher = await mongoose
+        .model("Voucher")
+        .findById(order.voucher_id)
+        .session(session);
+      if (!voucher) throw new Error("Voucher not found!");
+      if (voucher.discountType === "percentage") {
+        discount_amount = (voucher.discount / 100) * total_amount;
+      } else {
+        discount_amount = voucher.discount;
+      }
+      final_amount = total_amount - discount_amount;
+      if (final_amount < 0) throw new Error("Final amount cannot be negative!");
+    }
+
+    await OrderDetail.findByIdAndUpdate(
+      orderId,
+      { total_amount, discount_amount, final_amount, updated_at: new Date() },
+      { session }
+    );
+  } catch (error) {
+    console.error(
+      `Error updating amounts for order ${orderId}:`,
+      error.message
+    );
+    throw error;
+  }
+}
 
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -1292,7 +1327,9 @@ const handlePaymentReturn = async (req, res) => {
     vnp_Params = sortObject(vnp_Params);
     const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+    const calculatedHash = hmac
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
 
     console.log(`Return signData: ${signData}`);
     console.log(`Return vnp_SecureHash: ${vnp_SecureHash}`);
@@ -1305,14 +1342,20 @@ const handlePaymentReturn = async (req, res) => {
     const order = await mongoose.model("OrderDetail").findById(order_id);
     if (!order) {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent('Order not found')}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-failed?message=${encodeURIComponent("Order not found")}`
       );
     }
 
     // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent('Sai chữ ký (Checksum failed)')}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-failed?message=${encodeURIComponent(
+          "Sai chữ ký (Checksum failed)"
+        )}`
       );
     }
 
@@ -1321,33 +1364,46 @@ const handlePaymentReturn = async (req, res) => {
       "00": "Giao dịch thành công",
       "07": "Giao dịch bị nghi ngờ gian lận",
       "09": "Thẻ/Tài khoản chưa đăng ký Internet Banking",
-      "10": "Xác thực thẻ/tài khoản không đúng quá 3 lần",
-      "11": "Hết hạn chờ thanh toán",
-      "12": "Thẻ/Tài khoản bị khóa",
-      "13": "Sai OTP",
-      "24": "Khách hàng hủy giao dịch",
-      "51": "Tài khoản không đủ số dư",
-      "65": "Vượt hạn mức giao dịch trong ngày",
-      "75": "Ngân hàng đang bảo trì",
-      "79": "Sai mật khẩu thanh toán quá số lần",
-      "97": "Sai chữ ký",
-      "99": "Lỗi không xác định",
+      10: "Xác thực thẻ/tài khoản không đúng quá 3 lần",
+      11: "Hết hạn chờ thanh toán",
+      12: "Thẻ/Tài khoản bị khóa",
+      13: "Sai OTP",
+      24: "Khách hàng hủy giao dịch",
+      51: "Tài khoản không đủ số dư",
+      65: "Vượt hạn mức giao dịch trong ngày",
+      75: "Ngân hàng đang bảo trì",
+      79: "Sai mật khẩu thanh toán quá số lần",
+      97: "Sai chữ ký",
+      99: "Lỗi không xác định",
     };
 
-    const message = errorMessages[vnp_ResponseCode] || `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
+    const message =
+      errorMessages[vnp_ResponseCode] ||
+      `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
     if (vnp_ResponseCode === "00") {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}&message=${encodeURIComponent(message)}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-success?order_id=${order_id}&message=${encodeURIComponent(
+          message
+        )}`
       );
     } else {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(message)}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-failed?message=${encodeURIComponent(message)}`
       );
     }
   } catch (error) {
-    console.error(`Error in handlePaymentReturn for order ${req.query.vnp_TxnRef}:`, error);
+    console.error(
+      `Error in handlePaymentReturn for order ${req.query.vnp_TxnRef}:`,
+      error
+    );
     return res.redirect(
-      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent('Error processing payment')}`
+      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(
+        "Error processing payment"
+      )}`
     );
   }
 };
@@ -1356,7 +1412,10 @@ const handlePaymentIPN = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    console.log('Starting IPN processing for request:', JSON.stringify(req.query));
+    console.log(
+      "Starting IPN processing for request:",
+      JSON.stringify(req.query)
+    );
     let vnp_Params = req.query;
     const vnp_SecureHash = vnp_Params.vnp_SecureHash;
     const order_id = vnp_Params.vnp_TxnRef;
@@ -1365,7 +1424,9 @@ const handlePaymentIPN = async (req, res) => {
     const vnp_TransactionStatus = vnp_Params.vnp_TransactionStatus;
     const vnp_TransactionNo = vnp_Params.vnp_TransactionNo;
 
-    console.log(`Extracted parameters: order_id=${order_id}, amount=${vnp_Amount}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}, transactionNo=${vnp_TransactionNo}`);
+    console.log(
+      `Extracted parameters: order_id=${order_id}, amount=${vnp_Amount}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}, transactionNo=${vnp_TransactionNo}`
+    );
 
     delete vnp_Params.vnp_SecureHash;
     delete vnp_Params.vnp_SecureHashType;
@@ -1374,7 +1435,9 @@ const handlePaymentIPN = async (req, res) => {
     vnp_Params = sortObject(vnp_Params);
     const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+    const calculatedHash = hmac
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
 
     console.log(`IPN signData: ${signData}`);
     console.log(`IPN vnp_SecureHash: ${vnp_SecureHash}`);
@@ -1382,24 +1445,35 @@ const handlePaymentIPN = async (req, res) => {
 
     // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
-      console.error(`Invalid signature for IPN, order ${order_id}. Expected: ${calculatedHash}, Received: ${vnp_SecureHash}`);
+      console.error(
+        `Invalid signature for IPN, order ${order_id}. Expected: ${calculatedHash}, Received: ${vnp_SecureHash}`
+      );
       await session.abortTransaction();
-      return res.status(200).json({ RspCode: "97", Message: "Checksum failed" });
+      return res
+        .status(200)
+        .json({ RspCode: "97", Message: "Checksum failed" });
     }
     console.log(`Signature verification passed for order ${order_id}`);
 
     // Kiểm tra đơn hàng
-    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    const order = await mongoose
+      .model("OrderDetail")
+      .findById(order_id)
+      .session(session);
     if (!order) {
       console.error(`Order not found for IPN, order ${order_id}`);
       await session.abortTransaction();
-      return res.status(200).json({ RspCode: "01", Message: "Order not found" });
+      return res
+        .status(200)
+        .json({ RspCode: "01", Message: "Order not found" });
     }
     console.log(`Order found: ${JSON.stringify(order)}`);
 
     // Kiểm tra số tiền
     if (order.final_amount !== vnp_Amount) {
-      console.error(`Invalid amount for IPN, order ${order_id}: expected ${order.final_amount}, got ${vnp_Amount}`);
+      console.error(
+        `Invalid amount for IPN, order ${order_id}: expected ${order.final_amount}, got ${vnp_Amount}`
+      );
       await session.abortTransaction();
       return res.status(200).json({ RspCode: "04", Message: "Invalid amount" });
     }
@@ -1407,9 +1481,13 @@ const handlePaymentIPN = async (req, res) => {
 
     // Kiểm tra trạng thái
     if (order.payment_status === "success" || order.status === "completed") {
-      console.log(`Order already processed for IPN, order ${order_id}, payment_status=${order.payment_status}, status=${order.status}`);
+      console.log(
+        `Order already processed for IPN, order ${order_id}, payment_status=${order.payment_status}, status=${order.status}`
+      );
       await session.abortTransaction();
-      return res.status(200).json({ RspCode: "02", Message: "Order already confirmed" });
+      return res
+        .status(200)
+        .json({ RspCode: "02", Message: "Order already confirmed" });
     }
     console.log(`Order status check passed for order ${order_id}`);
 
@@ -1427,15 +1505,21 @@ const handlePaymentIPN = async (req, res) => {
       );
 
       if (order.voucher_id) {
-        console.log(`Updating voucher usage for voucher_id ${order.voucher_id}`);
-        await mongoose.model("Voucher").findByIdAndUpdate(
-          order.voucher_id,
-          { $inc: { usedCount: 1 } },
-          { session }
+        console.log(
+          `Updating voucher usage for voucher_id ${order.voucher_id}`
         );
+        await mongoose
+          .model("Voucher")
+          .findByIdAndUpdate(
+            order.voucher_id,
+            { $inc: { usedCount: 1 } },
+            { session }
+          );
       }
     } else {
-      console.log(`Processing failed payment for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}`);
+      console.log(
+        `Processing failed payment for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}`
+      );
       await mongoose.model("OrderDetail").findByIdAndUpdate(
         order_id,
         {
@@ -1447,17 +1531,24 @@ const handlePaymentIPN = async (req, res) => {
     }
 
     await session.commitTransaction();
-    console.log(`IPN processed successfully for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionNo=${vnp_TransactionNo}`);
+    console.log(
+      `IPN processed successfully for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionNo=${vnp_TransactionNo}`
+    );
     return res.status(200).json({ RspCode: "00", Message: "Success" });
   } catch (error) {
-    console.error(`Error in handlePaymentIPN for order ${req.query.vnp_TxnRef}: ${error.message}`, {
-      stack: error.stack,
-      params: req.query
-    });
+    console.error(
+      `Error in handlePaymentIPN for order ${req.query.vnp_TxnRef}: ${error.message}`,
+      {
+        stack: error.stack,
+        params: req.query,
+      }
+    );
     await session.abortTransaction();
     return res.status(200).json({ RspCode: "99", Message: "Unknown error" });
   } finally {
-    console.log(`Ending session for IPN processing, order ${req.query.vnp_TxnRef}`);
+    console.log(
+      `Ending session for IPN processing, order ${req.query.vnp_TxnRef}`
+    );
     session.endSession();
   }
 };
@@ -1500,6 +1591,13 @@ const addItemsToOrder = async (req, res) => {
         data: null,
       });
     }
+    if (order.payment_status === "success") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Cannot modify items in a paid order!",
+        data: null,
+      });
+    }
 
     // Kiểm tra món ăn
     const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
@@ -1531,15 +1629,12 @@ const addItemsToOrder = async (req, res) => {
       }
     }
 
-    // Lấy danh sách món hiện có trong đơn hàng
+    // Lấy danh sách món hiện có
     const existingItemOrders = await ItemOrder.find({
       order_id: order._id,
     }).session(session);
     const itemOrderMap = new Map(
-      existingItemOrders.map((io) => [
-        `${io.item_id}-${io.size || "default"}`,
-        io,
-      ])
+      existingItemOrders.map((io) => [`${io.item_id}-${io.size || ""}`, io])
     );
 
     const newItemOrders = [];
@@ -1547,19 +1642,17 @@ const addItemsToOrder = async (req, res) => {
 
     // Xử lý từng món trong request
     for (const item of items) {
-      const key = `${item.id}-${item.size || "default"}`;
+      const key = `${item.id}-${item.size || ""}`;
       const existingItemOrder = itemOrderMap.get(key);
 
       if (existingItemOrder) {
-        // Cập nhật số lượng món hiện có
         updatedItemOrders.push({
           ...existingItemOrder.toObject(),
           quantity: existingItemOrder.quantity + item.quantity,
-          note: item.note || existingItemOrder.note || "", // Giữ note cũ nếu không có note mới
+          note: item.note || existingItemOrder.note || "",
         });
-        itemOrderMap.delete(key); // Xóa khỏi map để không xử lý lại
+        itemOrderMap.delete(key);
       } else {
-        // Thêm món mới
         newItemOrders.push({
           item_id: new mongoose.Types.ObjectId(item.id),
           quantity: item.quantity,
@@ -1575,7 +1668,7 @@ const addItemsToOrder = async (req, res) => {
 
     // Xóa các món cũ và tạo lại
     await ItemOrder.deleteMany({ order_id: order._id }).session(session);
-    if (updatedItemOrders.length > 0) {
+    if (updatedItemOrders.length > 0 || newItemOrders.length > 0) {
       await orderService.createItemOrders(
         updatedItemOrders.concat(newItemOrders),
         { session }
@@ -1591,8 +1684,8 @@ const addItemsToOrder = async (req, res) => {
     // Lấy thông tin chi tiết món để trả về
     const allItemOrders = await ItemOrder.find({ order_id: order._id }).session(
       null
-    ); // Không cần session sau commit
-    const enrichedItemOrders = await Promise.all(
+    );
+    const enrichedItems = await Promise.all(
       allItemOrders.map(async (itemOrder) => {
         const item =
           itemMap.get(itemOrder.item_id.toString()) ||
@@ -1614,42 +1707,34 @@ const addItemsToOrder = async (req, res) => {
       })
     );
 
-    // Gửi thông báo Socket.IO
+
+    const user = req.user;
+    
+    setImmediate(() => {
+      socketOrderService.notifyOrderItemsUpdate(order, allItemOrders, user);
+    });
+
     setImmediate(async () => {
+      const newSession = await mongoose.startSession();
+      newSession.startTransaction();
       try {
-        const { io, adminSockets } = require("../app");
-        const notification = {
-          orderId: order._id.toString(),
-          customerId: order.customer_id.toString(),
-          type: order.type,
-          status: order.status,
-          staffId: req.user?._id?.toString() || null,
-          time: order.time.toISOString(),
-          createdAt: new Date().toISOString(),
-          message: `Items added to order ${order._id}: ${items
-            .map(
-              (i) =>
-                `${i.quantity} x ${itemMap.get(i.id)?.name || i.id}${
-                  i.size ? ` (${i.size})` : ""
-                }`
-            )
-            .join(", ")}`,
-          items: enrichedItemOrders,
-        };
-        adminSockets.forEach((socket) => {
-          socket.emit("orderItemsUpdate", notification); // Sử dụng event riêng để phân biệt
-        });
+        await updateOrderAmounts(order._id, newSession);
+        await newSession.commitTransaction();
       } catch (error) {
-        console.error("Error sending notification:", error.message);
+        await newSession.abortTransaction();
+        console.error("Error updating order amounts:", error.message);
+      } finally {
+        newSession.endSession();
       }
     });
 
+    
     return res.status(200).json({
       status: "SUCCESS",
       message: "Items added to order successfully!",
       data: {
         order_id: order._id,
-        items: enrichedItemOrders, // Trả về toàn bộ món trong đơn hàng
+        items: enrichedItems,
       },
     });
   } catch (error) {
@@ -1703,6 +1788,13 @@ const cancelItems = async (req, res) => {
         data: null,
       });
     }
+    if (order.payment_status === "success") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Cannot cancel items in a paid order!",
+        data: null,
+      });
+    }
 
     // Kiểm tra món ăn
     const itemIds = items.map(
@@ -1719,10 +1811,7 @@ const cancelItems = async (req, res) => {
       order_id: order._id,
     }).session(session);
     const itemOrderMap = new Map(
-      existingItemOrders.map((io) => [
-        `${io.item_id}-${io.size || "default"}`,
-        io,
-      ])
+      existingItemOrders.map((io) => [`${io.item_id}-${io.size || ""}`, io])
     );
 
     const canceledItemOrders = [];
@@ -1748,7 +1837,7 @@ const cancelItems = async (req, res) => {
         }
       }
 
-      const key = `${item.item_id}-${item.size || "default"}`;
+      const key = `${item.item_id}-${item.size || ""}`;
       const existingItemOrder = itemOrderMap.get(key);
       if (!existingItemOrder) {
         throw new Error(
@@ -1770,7 +1859,7 @@ const cancelItems = async (req, res) => {
         order_id: order._id,
         size: item.size || null,
         note: existingItemOrder.note || "",
-        cancel_reason: item.cancel_reason || "",
+        cancel_reason: item.cancel_reason || "User request",
         canceled_by: req.user._id,
       });
 
@@ -1782,7 +1871,7 @@ const cancelItems = async (req, res) => {
           quantity: remainingQuantity,
         });
       }
-      itemOrderMap.delete(key); // Xóa khỏi map
+      itemOrderMap.delete(key);
     }
 
     // Giữ các món không bị ảnh hưởng
@@ -1832,7 +1921,7 @@ const cancelItems = async (req, res) => {
       })
     );
 
-    // Lấy danh sách món còn lại để trả về
+    // Lấy danh sách món còn lại
     const remainingItemOrders = await ItemOrder.find({
       order_id: order._id,
     }).session(null);
@@ -1889,6 +1978,20 @@ const cancelItems = async (req, res) => {
       }
     });
 
+    setImmediate(async () => {
+      const newSession = await mongoose.startSession();
+      newSession.startTransaction();
+      try {
+        await updateOrderAmounts(order._id, newSession);
+        await newSession.commitTransaction();
+      } catch (error) {
+        await newSession.abortTransaction();
+        console.error("Error updating order amounts:", error.message);
+      } finally {
+        newSession.endSession();
+      }
+    });
+
     return res.status(200).json({
       status: "SUCCESS",
       message: "Items canceled successfully!",
@@ -1910,6 +2013,31 @@ const cancelItems = async (req, res) => {
   }
 };
 
+const socket = require("../socket.js");
+
+const testNewOrder = async (req, res) => {
+  try {
+    const io = socket.getIO();
+    const notification = {
+      orderId: "test123",
+      message: "Test new order",
+    };
+
+    io.emit("admintest", notification);
+
+    res.json({
+      status: "SUCCESS",
+      message: "Thông báo gửi thành công",
+      data: notification,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "ERROR",
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAllOrders,
   getAllOrdersInfo,
@@ -1926,4 +2054,5 @@ module.exports = {
   handlePaymentIPN,
   addItemsToOrder,
   cancelItems,
+  testNewOrder
 };

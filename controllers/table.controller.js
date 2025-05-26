@@ -242,7 +242,20 @@ const releaseTable = async (req, res) => {
       });
     }
 
-    // Xóa bản ghi đặt chỗ thay vì cập nhật end_time
+    // Kiểm tra số lượng bàn còn lại của đơn hàng
+    const remainingReservations = await ReservedTable.countDocuments({
+      reservation_id,
+      _id: { $ne: reservationTable._id }, // Loại trừ bản ghi đang muốn xóa
+    });
+    if (remainingReservations === 0) {
+      return res.status(400).json({
+        status: 'ERROR',
+        message: 'Không thể xóa bàn vì đơn hàng không được để trống bàn!',
+        data: null,
+      });
+    }
+
+    // Xóa bản ghi đặt chỗ
     await ReservedTable.deleteOne({ reservation_id, table_id });
 
     const tableInfo = await TableInfo.findById(table_id).lean();
@@ -274,6 +287,7 @@ const releaseTable = async (req, res) => {
     });
   }
 };
+
 const getAvailableTables = async (req, res) => {
   try {
     const { start_time, end_time } = req.query;

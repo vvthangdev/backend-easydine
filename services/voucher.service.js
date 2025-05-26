@@ -165,67 +165,49 @@ async function removeUsersFromVoucher(voucherId, userIds) {
   }
 }
 
-async function calculateOrderTotal(orderId) {
+async function calculateOrderTotal(orderId, options = {}) {
+  const { session } = options;
   try {
     if (!mongoose.Types.ObjectId.isValid(orderId)) {
-      throw new Error('Invalid order ID');
+      throw new Error(`Invalid order ID: ${orderId}`);
     }
 
-    const itemOrders = await ItemOrder.find({ order_id: orderId }).populate('item_id');
-    console.log(`Found ${itemOrders.length} itemOrders for order ${orderId}`);
-    if (!itemOrders.length) throw new Error('Đơn hàng không có sản phẩm');
+    const itemOrders = await ItemOrder.find({ order_id: orderId })
+      .populate("item_id")
+      .session(session);
+    if (!itemOrders.length) throw new Error("Đơn hàng không có sản phẩm");
 
     const totalAmount = itemOrders.reduce((total, itemOrder, index) => {
       if (!itemOrder.item_id) {
-        console.warn(`ItemOrder ${itemOrder._id} (index ${index}) has invalid item_id`);
         throw new Error(`Sản phẩm không hợp lệ cho ItemOrder ${itemOrder._id}`);
       }
-
-      let price = itemOrder.item_id.price; // Giá mặc định
-
-      // Nếu có size được chọn, tìm giá tương ứng
+      let price = itemOrder.item_id.price;
       if (itemOrder.size) {
         const selectedSize = itemOrder.item_id.sizes.find(
-          (size) => size.name.toLowerCase() === itemOrder.size.toLowerCase()
+          size => size.name.toLowerCase() === itemOrder.size.toLowerCase()
         );
         if (!selectedSize) {
-          console.warn(`ItemOrder ${itemOrder._id} (index ${index}): Invalid size ${itemOrder.size} for item ${itemOrder.item_id.name}`);
           throw new Error(
             `Kích thước ${itemOrder.size} không hợp lệ cho sản phẩm ${itemOrder.item_id.name}`
           );
         }
         price = selectedSize.price;
       }
-
-      // Kiểm tra giá hợp lệ
       if (!price && price !== 0) {
-        console.warn(`ItemOrder ${itemOrder._id} (index ${index}): No price for item ${itemOrder.item_id.name}`);
         throw new Error(`Sản phẩm ${itemOrder.item_id.name} thiếu giá`);
       }
-
       const itemTotal = itemOrder.quantity * price;
-      console.log(`ItemOrder ${itemOrder._id} (index ${index}): Item: ${itemOrder.item_id.name}, Size: ${itemOrder.size || 'none'}, Price: ${price}, Quantity: ${itemOrder.quantity}, Total: ${itemTotal}`);
-
       return total + itemTotal;
     }, 0);
 
-    console.log(`Total amount for order ${orderId}: ${totalAmount}`);
     if (totalAmount <= 0) {
-      throw new Error('Tổng giá trị đơn hàng phải lớn hơn 0');
+      throw new Error("Tổng giá trị đơn hàng phải lớn hơn 0");
     }
-
-    // Cập nhật total_amount vào OrderDetail
-    await OrderDetail.findByIdAndUpdate(
-      orderId,
-      { total_amount: totalAmount },
-      { new: true }
-    );
-    console.log(`Updated total_amount=${totalAmount} for order ${orderId}`);
 
     return totalAmount;
   } catch (error) {
-    console.error('Error calculating order total:', error);
-    throw new Error(error.message || 'Lỗi khi tính tổng giá trị đơn hàng');
+    console.error(`Error calculating order total for ${orderId}:`, error.message);
+    throw error;
   }
 }
 

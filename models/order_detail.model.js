@@ -4,7 +4,7 @@ const orderDetailSchema = new mongoose.Schema({
   customer_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   staff_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   time: { type: Date, default: Date.now },
-  type: { type: String, enum: ["reservation", "ship"], required: true },
+  type: { type: String, enum: ["reservation", "takeaway"], required: true },
   status: {
     type: String,
     enum: ["pending", "confirmed", "canceled", "completed"],

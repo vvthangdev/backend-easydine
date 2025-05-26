@@ -1,35 +1,34 @@
-/**
- * Socket.IO Module
- * Quản lý tập trung tất cả chức năng Socket.IO
- */
 const { Server } = require("socket.io");
-const authMiddleware = require('./middleware/auth');
-const adminHandlers = require('./handlers/admin');
+// const authMiddleware = require("./middleware/auth");
+// const adminHandlers = require("./handlers/admin");
 
 let io;
 const adminSockets = new Map();
 
-/**
- * Khởi tạo Socket.IO server
- * @param {Object} server - HTTP server
- * @param {Object} options - Tùy chọn cấu hình
- * @returns {Object} io - Socket.IO instance
- */
 const init = (server, options = {}) => {
   // Khởi tạo Socket.IO server với options
+    // io = new Server(server, {
+  //   cors: options.cors || {
+  //     origin: process.env.FRONTEND_URL || '*',
+  //     methods: ["GET", "POST"],
+  //   },
+  // });
   io = new Server(server, {
-    cors: options.cors || {
-      origin: process.env.FRONTEND_URL || '*',
+    cors: {
+      origin: `*`,
       methods: ["GET", "POST"],
     },
   });
 
+
   // Áp dụng middleware xác thực
-  io.use(authMiddleware);
+  // io.use(authMiddleware);
 
   // Xử lý kết nối
   io.on("connection", (socket) => {
-    console.log(`User ${socket.user.username} đã kết nối, socket ID: ${socket.id}`);
+    console.log(
+      `User ${socket.user.username} đã kết nối, socket ID: ${socket.id}`
+    );
 
     // Xử lý các sự kiện liên quan đến admin
     if (socket.user.role === "ADMIN") {
@@ -42,7 +41,7 @@ const init = (server, options = {}) => {
     }
 
     // Đăng ký các event handlers
-    adminHandlers(io, socket, adminSockets);
+    // adminHandlers(io, socket, adminSockets);
 
     // Xử lý ngắt kết nối
     socket.on("disconnect", () => {
@@ -63,7 +62,7 @@ const init = (server, options = {}) => {
  */
 const getIO = () => {
   if (!io) {
-    throw new Error('Socket.IO chưa được khởi tạo. Hãy gọi init() trước.');
+    throw new Error("Socket.IO chưa được khởi tạo. Hãy gọi init() trước.");
   }
   return io;
 };
@@ -79,5 +78,5 @@ const getAdminSockets = () => {
 module.exports = {
   init,
   getIO,
-  getAdminSockets
+  getAdminSockets,
 };
