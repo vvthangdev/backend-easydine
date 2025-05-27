@@ -76,4 +76,7 @@ router.post(
 );
 
 router.get("/test01", orderController.testNewOrder)
+
+router.get("/test02", orderController.testNewOrder2)
+
 module.exports = router;

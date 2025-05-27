@@ -14,6 +14,7 @@ const { calculateOrderTotal } = require("../services/voucher.service");
 const moment = require("moment");
 const qs = require("qs");
 
+const socket = require("../socket/socket");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 
@@ -173,6 +174,27 @@ const createOrder = async (req, res) => {
     // Gửi thông báo Socket.IO đến admin
     setImmediate(() => {
       socketOrderService.notifyNewOrder(newOrder, req.user);
+    });
+
+    setImmediate(() => {
+      try {
+        const io = socket.getIO(); // Lấy instance io
+        io.to("adminRoom").emit("orderCreated", {
+          orderId: newOrder._id,
+          customerId: req.user._id,
+          username: req.user.username,
+          type: newOrder.type,
+          createdAt: newOrder.createdAt,
+        });
+        console.log(
+          `[Socket.IO] Emitted orderCreated to adminRoom for order ${newOrder._id}`
+        );
+      } catch (error) {
+        console.error(
+          "[Socket.IO] Error emitting orderCreated:",
+          error.message
+        );
+      }
     });
 
     // Gửi email xác nhận
@@ -1707,9 +1729,8 @@ const addItemsToOrder = async (req, res) => {
       })
     );
 
-
     const user = req.user;
-    
+
     setImmediate(() => {
       socketOrderService.notifyOrderItemsUpdate(order, allItemOrders, user);
     });
@@ -1728,7 +1749,6 @@ const addItemsToOrder = async (req, res) => {
       }
     });
 
-    
     return res.status(200).json({
       status: "SUCCESS",
       message: "Items added to order successfully!",
@@ -2013,14 +2033,12 @@ const cancelItems = async (req, res) => {
   }
 };
 
-const socket = require("../socket.js");
-
 const testNewOrder = async (req, res) => {
   try {
     const io = socket.getIO();
     const notification = {
       orderId: "test123",
-      message: "Test new order",
+      message: "Test new order 01",
     };
 
     io.emit("admintest", notification);
@@ -2034,6 +2052,46 @@ const testNewOrder = async (req, res) => {
     res.status(500).json({
       status: "ERROR",
       message: error.message,
+    });
+  }
+};
+
+const testNewOrder2 = async (req, res) => {
+  try {
+    const io = socket.getIO(); // Lấy instance io
+
+    // Dữ liệu giả lập đơn hàng mới
+    const notification = {
+      orderId: "test123",
+      customerId: req.user?._id || "testUser123",
+      username: req.user?.username || "testUser",
+      type: "reservation",
+      createdAt: new Date().toISOString(),
+      message: "Test new order 02",
+    };
+
+    // Gửi sự kiện newOrder đến adminRoom
+    io.to("adminRoom").emit("newOrder", notification);
+    console.log(
+      `[Socket.IO] Emitted newOrder to adminRoom for test order ${notification.orderId}`
+    );
+
+    // (Tùy chọn) Gửi sự kiện admintest nếu cần
+    // io.to("adminRoom").emit("admintest", notification);
+    // console.log(
+    //   `[Socket.IO] Emitted admintest to adminRoom for test order ${notification.orderId}`
+    // );
+
+    res.json({
+      status: "SUCCESS",
+      message: "Thông báo test đơn hàng gửi thành công",
+      data: notification,
+    });
+  } catch (error) {
+    console.error("[testNewOrder] Error:", error.message);
+    res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Lỗi khi gửi thông báo test đơn hàng!",
     });
   }
 };
@@ -2054,5 +2112,6 @@ module.exports = {
   handlePaymentIPN,
   addItemsToOrder,
   cancelItems,
-  testNewOrder
+  testNewOrder,
+  testNewOrder2,
 };

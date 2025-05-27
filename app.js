@@ -6,7 +6,7 @@ const multer = require("multer");
 const session = require("express-session");
 const passport = require("passport");
 // const socketModule = require("./socket/index.js");
-const socket = require("./socket.js");
+const socket = require ("./socket/socket.js")
 
 // Khởi tạo Express app và HTTP server
 const app = express();
