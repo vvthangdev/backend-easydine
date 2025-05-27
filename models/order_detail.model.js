@@ -16,8 +16,7 @@ const orderDetailSchema = new mongoose.Schema({
   vnp_transaction_no: { type: String, default: null }, // vnp_TransactionNo từ VNPay
   payment_method: { 
     type: String, 
-    enum: ["vnpay", "cash", "bank_transfer"], 
-    default: "vnpay" 
+    enum: ["vnpay", "cash", "bank_transfer"],
   },
   payment_status: {
     type: String,

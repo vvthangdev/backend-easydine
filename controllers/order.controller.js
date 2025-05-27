@@ -4,13 +4,10 @@ const ReservedTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
-const Voucher = require("../models/voucher.model");
 const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
-const { getIO, getAdminSockets } = require("../socket");
-const socketOrderService = require("../socket/services/order");
-const { calculateOrderTotal } = require("../services/voucher.service");
+
 const moment = require("moment");
 const qs = require("qs");
 
@@ -18,41 +15,6 @@ const socket = require("../socket/socket");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
 
-async function updateOrderAmounts(orderId, session) {
-  try {
-    const total_amount = await calculateOrderTotal(orderId, { session });
-    let discount_amount = 0;
-    let final_amount = total_amount;
-
-    const order = await OrderDetail.findById(orderId).session(session);
-    if (order.voucher_id) {
-      const voucher = await mongoose
-        .model("Voucher")
-        .findById(order.voucher_id)
-        .session(session);
-      if (!voucher) throw new Error("Voucher not found!");
-      if (voucher.discountType === "percentage") {
-        discount_amount = (voucher.discount / 100) * total_amount;
-      } else {
-        discount_amount = voucher.discount;
-      }
-      final_amount = total_amount - discount_amount;
-      if (final_amount < 0) throw new Error("Final amount cannot be negative!");
-    }
-
-    await OrderDetail.findByIdAndUpdate(
-      orderId,
-      { total_amount, discount_amount, final_amount, updated_at: new Date() },
-      { session }
-    );
-  } catch (error) {
-    console.error(
-      `Error updating amounts for order ${orderId}:`,
-      error.message
-    );
-    throw error;
-  }
-}
 
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -60,29 +22,32 @@ const createOrder = async (req, res) => {
   try {
     const { start_time, end_time, tables, items, ...orderData } = req.body;
 
+    // Kiểm tra dữ liệu đầu vào
     if (!start_time || !end_time) {
       return res.status(400).json({
         status: "ERROR",
-        message: "start_time and end_time are required!",
+        message: "Yêu cầu phải có start_time và end_time!",
         data: null,
       });
     }
     if (orderData.type === "reservation" && (!tables || tables.length === 0)) {
       return res.status(400).json({
         status: "ERROR",
-        message: "At least one table is required for reservation!",
+        message: "Đặt bàn phải có ít nhất một bàn!",
         data: null,
       });
     }
 
+    // Kiểm tra tính hợp lệ của table_id
     if (orderData.type === "reservation") {
       for (const tableId of tables) {
         if (!mongoose.Types.ObjectId.isValid(tableId)) {
-          throw new Error("Invalid table_id!");
+          throw new Error("table_id không hợp lệ!");
         }
       }
     }
 
+    // Tạo dữ liệu đơn hàng mới
     const newOrderData = {
       customer_id: req.user._id,
       time: new Date(start_time),
@@ -92,8 +57,10 @@ const createOrder = async (req, res) => {
       newOrderData.staff_id = req.user._id;
     }
 
+    // Tạo đơn hàng
     const newOrder = await orderService.createOrder(newOrderData, { session });
 
+    // Xử lý đặt bàn nếu là reservation
     if (orderData.type === "reservation") {
       const startTime = new Date(start_time);
       const endTime = new Date(end_time);
@@ -102,7 +69,7 @@ const createOrder = async (req, res) => {
         session
       );
       if (tableInfos.length !== tables.length) {
-        throw new Error("One or more table_ids not found!");
+        throw new Error("Một hoặc nhiều table_id không tồn tại!");
       }
 
       const unavailableTables = await orderService.checkUnavailableTables(
@@ -111,7 +78,7 @@ const createOrder = async (req, res) => {
         tables
       );
       if (unavailableTables.length > 0) {
-        throw new Error("Some selected tables are not available!");
+        throw new Error("Một số bàn đã chọn không khả dụng!");
       }
 
       const reservedTables = tables.map((tableId) => ({
@@ -123,6 +90,7 @@ const createOrder = async (req, res) => {
       await orderService.createReservations(reservedTables, { session });
     }
 
+    // Xử lý các mục hàng (items) nếu có
     if (items && items.length > 0) {
       const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
       const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
@@ -134,20 +102,20 @@ const createOrder = async (req, res) => {
 
       for (const item of items) {
         if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
-          throw new Error("Invalid item ID!");
+          throw new Error("ID mục hàng không hợp lệ!");
         }
         if (!item.quantity || item.quantity < 1) {
-          throw new Error("Quantity must be a positive number!");
+          throw new Error("Số lượng phải là số dương!");
         }
         const itemExists = itemMap.get(item.id);
         if (!itemExists) {
-          throw new Error(`Item with ID ${item.id} not found!`);
+          throw new Error(`Mục hàng với ID ${item.id} không tồn tại!`);
         }
         if (item.size) {
           const validSize = itemExists.sizes.find((s) => s.name === item.size);
           if (!validSize) {
             throw new Error(
-              `Invalid size ${item.size} for item ${itemExists.name}!`
+              `Kích thước ${item.size} không hợp lệ cho mục hàng ${itemExists.name}!`
             );
           }
         }
@@ -163,60 +131,57 @@ const createOrder = async (req, res) => {
       await orderService.createItemOrders(itemOrders, { session });
     }
 
+    // Cập nhật số tiền đơn hàng trong cùng giao dịch
+    await orderService.updateOrderAmounts(newOrder._id, session);
+
+    // Chuyển newOrder thành đối tượng JavaScript và thêm danh sách bàn
+    const orderResponse = newOrder.toObject(); // Chuyển Mongoose document thành plain object
+    if (orderData.type === "reservation") {
+      orderResponse.tables = tables; // Thêm danh sách table_id
+      // Lấy thêm thông tin chi tiết về bàn (table_number, area)
+      const tableInfos = await TableInfo.find({ _id: { $in: tables } })
+        .select("table_number area")
+        .lean()
+        .session(session);
+      orderResponse.tableDetails = tableInfos; // Thêm thông tin chi tiết về bàn
+    }
+
+    // Hoàn tất giao dịch
     await session.commitTransaction();
 
+    // Chuẩn bị phản hồi
     const response = {
       status: "SUCCESS",
-      message: "Order created successfully!",
-      data: newOrder,
+      message: "Tạo đơn hàng thành công!",
+      data: orderResponse,
     };
 
-    // Gửi thông báo Socket.IO đến admin
-    setImmediate(() => {
-      socketOrderService.notifyNewOrder(newOrder, req.user);
-    });
+    // Gửi thông báo Socket.IO với orderResponse đã có danh sách bàn
+    const io = socket.getIO();
+    io.to("adminRoom").emit("newOrder", orderResponse);
+    console.log(`Đơn hàng mới: ${JSON.stringify(orderResponse, null, 2)}`);
 
-    setImmediate(() => {
-      try {
-        const io = socket.getIO(); // Lấy instance io
-        io.to("adminRoom").emit("orderCreated", {
-          orderId: newOrder._id,
-          customerId: req.user._id,
-          username: req.user.username,
-          type: newOrder.type,
-          createdAt: newOrder.createdAt,
-        });
-        console.log(
-          `[Socket.IO] Emitted orderCreated to adminRoom for order ${newOrder._id}`
-        );
-      } catch (error) {
-        console.error(
-          "[Socket.IO] Error emitting orderCreated:",
-          error.message
-        );
-      }
-    });
-
-    // Gửi email xác nhận
+    // Gửi email xác nhận (không chặn luồng chính)
     setImmediate(async () => {
       try {
         const user = await getUserByUserId(req.user._id);
         await emailService.sendOrderConfirmationEmail(
           user.email,
           user.name,
-          newOrder
+          orderResponse
         );
       } catch (emailError) {
-        console.error("Error sending email:", emailError.message);
+        console.error("Lỗi gửi email:", emailError.message);
       }
     });
 
+    // Trả về phản hồi cho client
     return res.status(201).json(response);
   } catch (error) {
     await session.abortTransaction();
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "An error occurred while creating the order!",
+      message: error.message || "Đã xảy ra lỗi khi tạo đơn hàng!",
       data: null,
     });
   } finally {
@@ -1729,17 +1694,11 @@ const addItemsToOrder = async (req, res) => {
       })
     );
 
-    const user = req.user;
-
-    setImmediate(() => {
-      socketOrderService.notifyOrderItemsUpdate(order, allItemOrders, user);
-    });
-
     setImmediate(async () => {
       const newSession = await mongoose.startSession();
       newSession.startTransaction();
       try {
-        await updateOrderAmounts(order._id, newSession);
+        await orderService.updateOrderAmounts(order._id, newSession);
         await newSession.commitTransaction();
       } catch (error) {
         await newSession.abortTransaction();
@@ -2002,7 +1961,7 @@ const cancelItems = async (req, res) => {
       const newSession = await mongoose.startSession();
       newSession.startTransaction();
       try {
-        await updateOrderAmounts(order._id, newSession);
+        await orderService.updateOrderAmounts(order._id, newSession);
         await newSession.commitTransaction();
       } catch (error) {
         await newSession.abortTransaction();
@@ -2035,23 +1994,53 @@ const cancelItems = async (req, res) => {
 
 const testNewOrder = async (req, res) => {
   try {
-    const io = socket.getIO();
+    const io = socket.getIO(); // Lấy instance io
+
+    // Dữ liệu giả lập đơn hàng mới
     const notification = {
       orderId: "test123",
-      message: "Test new order 01",
+      customerId: req.user?._id || "testUser123",
+      username: req.user?.username || "testUser",
+      type: "reservation",
+      createdAt: new Date().toISOString(),
+      message: "Test new order 02",
+      tables: ["68121990c68baaa9ac9fb684"], // Thêm tables để khớp với orderResponse trước đó
+      tableDetails: [
+        {
+          _id: "68121990c68baaa9ac9fb684",
+          table_number: 105,
+          area: "Tầng 1",
+        },
+      ],
+      staff_id: req.user?._id || "6811ff6de5541de1a1e96b1d",
+      status: "confirmed",
+      transaction_id: null,
+      vnp_transaction_no: null,
+      payment_status: "pending",
+      voucher_id: null,
+      total_amount: 0,
+      discount_amount: 0,
+      final_amount: 0,
+      _id: "683546d579b89ae594a6bc71",
+      __v: 0,
     };
 
-    io.emit("admintest", notification);
+    // Gửi sự kiện newOrder đến adminRoom
+    io.to("adminRoom").emit("newOrder", notification);
+    console.log(
+      `[Socket.IO] Emitted newOrder to adminRoom for test order ${notification.orderId}`
+    );
 
     res.json({
       status: "SUCCESS",
-      message: "Thông báo gửi thành công",
+      message: "Thông báo test đơn hàng gửi thành công",
       data: notification,
     });
   } catch (error) {
+    console.error("[testNewOrder2] Error:", error.message);
     res.status(500).json({
       status: "ERROR",
-      message: error.message,
+      message: error.message || "Lỗi khi gửi thông báo test đơn hàng!",
     });
   }
 };

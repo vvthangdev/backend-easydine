@@ -3,6 +3,7 @@ const OrderDetail = require("../models/order_detail.model");
 const ReservationTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
+const { calculateOrderTotal } = require("../services/voucher.service");
 const mongoose = require('mongoose');
 
 async function createOrder(orderData, options = {}) {
@@ -16,6 +17,41 @@ async function createOrder(orderData, options = {}) {
   }
 }
 
+async function updateOrderAmounts(orderId, session) {
+  try {
+    const total_amount = await calculateOrderTotal(orderId, { session });
+    let discount_amount = 0;
+    let final_amount = total_amount;
+
+    const order = await OrderDetail.findById(orderId).session(session);
+    if (order.voucher_id) {
+      const voucher = await mongoose
+        .model("Voucher")
+        .findById(order.voucher_id)
+        .session(session);
+      if (!voucher) throw new Error("Voucher not found!");
+      if (voucher.discountType === "percentage") {
+        discount_amount = (voucher.discount / 100) * total_amount;
+      } else {
+        discount_amount = voucher.discount;
+      }
+      final_amount = total_amount - discount_amount;
+      if (final_amount < 0) throw new Error("Final amount cannot be negative!");
+    }
+
+    await OrderDetail.findByIdAndUpdate(
+      orderId,
+      { total_amount, discount_amount, final_amount, updated_at: new Date() },
+      { session }
+    );
+  } catch (error) {
+    console.error(
+      `Error updating amounts for order ${orderId}:`,
+      error.message
+    );
+    throw error;
+  }
+}
 
 async function checkUnavailableTables(startTime, endTime, tableIds, excludeOrderId = null, options = {}) {
   try {
@@ -149,4 +185,5 @@ module.exports = {
   getTableById,
   createItemOrders,
   updateOrder,
+  updateOrderAmounts,
 };

@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 const Voucher = require("../models/voucher.model");
 const OrderDetail = require("../models/order_detail.model");
 const ItemOrder = require("../models/item_order.model");
-const Item = require("../models/item.model");
 
 async function getAllVouchers() {
   try {
