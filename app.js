@@ -62,7 +62,6 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// API thông tin về admin sockets
 // app.get("/api/admin-sockets", (req, res) => {
 //   const adminSockets = socketModule.getAdminSockets();
 //   const connectedAdmins = Array.from(adminSockets.keys());
@@ -118,6 +117,7 @@ const itemRouter = require("./routes/item.routes.js");
 const itemOrdRouter = require("./routes/item_order.routes.js");
 const adminRouter = require("./routes/admin.routes.js");
 const voucherRouter = require("./routes/voucher.routes.js");
+const canceledItemOrderRouter = require("./routes/canceledItem.routes.js")
 
 // Đăng ký routes
 app.use("/item", upload.none(), itemRouter);
@@ -127,6 +127,7 @@ app.use("/orders", orderRouter);
 app.use("/item-order", itemOrdRouter);
 app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
+app.use("/canceled-item-orders", canceledItemOrderRouter)
 
 // Khởi động server
 const PORT = process.env.PORT || 8080;

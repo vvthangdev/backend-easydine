@@ -93,8 +93,57 @@ async function notAdminRoleAuth(req, res, next) {
   }
 }
 
+function restrictTo(roles) {
+  return async (req, res, next) => {
+    try {
+      // Validate roles parameter
+      if (!roles || !Array.isArray(roles) || roles.length === 0) {
+        return res.status(500).json({
+          status: "ERROR",
+          message: "Internal Server Error: Roles configuration is invalid!",
+        });
+      }
+
+      // Check if user exists and has role
+      if (!req.user || !req.user.role) {
+        return res.status(403).json({
+          status: "ERROR",
+          message: "User role not found!",
+        });
+      }
+
+      // Check if user role is in allowed roles
+      if (roles.includes(req.user.role)) {
+        return next();
+      } else {
+        return res.status(403).json({
+          status: "ERROR",
+          message: "Forbidden: You do not have the required permissions.",
+        });
+      }
+    } catch (error) {
+      console.error("Error in restrictTo:", error);
+      return res.status(500).json({
+        status: "ERROR",
+        message: "Internal Server Error",
+        error: error.message,
+      });
+    }
+  };
+}
+
+// Middleware tiện ích cho các role phổ biến
+const requireAdmin = restrictTo(["ADMIN"]);
+const requireStaff = restrictTo(["ADMIN", "STAFF"]);
+const requireUser = restrictTo(["ADMIN", "STAFF", "USER"]);
+
+
 module.exports = {
   authenticateToken,
   adminRoleAuth,
   notAdminRoleAuth,
+  restrictTo,
+  requireAdmin,
+  requireStaff,
+  requireUser
 };
