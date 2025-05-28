@@ -13,6 +13,8 @@ const socket = {
       },
     });
 
+    console.log(`connected to : ${process.env.FRONTEND_URL}`)
+
     // Áp dụng middleware xác thực
     io.use(authMiddleware);
 
