@@ -5,6 +5,17 @@ const authMiddleware = require("../middlewares/auth.middleware.js");
 const router = express.Router();
 
 router.get("/", authMiddleware.authenticateToken, orderController.getAllOrders);
+
+router.post(
+  "/create-order",
+  authMiddleware.authenticateToken,
+  orderController.createOrder
+);
+
+router.post(
+  "/create-table-order",
+  orderController.createTableOrder
+);
 router.get(
   "/all-order-info",
   authMiddleware.authenticateToken,
@@ -31,11 +42,7 @@ router.get(
   authMiddleware.authenticateToken,
   orderController.getOrderInfo
 );
-router.post(
-  "/create-order",
-  authMiddleware.authenticateToken,
-  orderController.createOrder
-);
+
 router.get(
   "/search-by-customer",
   authMiddleware.authenticateToken,

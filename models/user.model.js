@@ -12,15 +12,15 @@ function removeVietnameseAccents(str) {
 
 const userSchema = new mongoose.Schema(
   {
-    username: { type: String, required: true, unique: true, index: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
+    username: { type: String, unique: true, sparse: true }, // Bỏ required
+    email: { type: String, unique: true, sparse: true }, // Bỏ required
+    password: { type: String }, // Bỏ required
     name: { type: String, default: "" },
     nameNoAccents: { type: String, default: "" },
     role: {
       type: String,
-      enum: ["ADMIN", "STAFF", "CUSTOMER"],
-      default: "CUSTOMER",
+      enum: ["ADMIN", "STAFF", "CUSTOMER", "GUEST"],
+      default: "CUSTOMER", // Mặc định là GUEST
     },
     address: { type: String, default: "" },
     avatar: { type: String, default: "" },

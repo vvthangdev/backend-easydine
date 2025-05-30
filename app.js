@@ -22,22 +22,21 @@ if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
 
+// app.use(
+//   cors({
+//     origin: process.env.FRONTEND_URL || true,
+//     credentials: true,
+//   })
+// );
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || true,
+    origin: true,
     credentials: true,
   })
 );
 
 socket.initSocket(server)
-// Cấu hình CORS
-const corsOptions = {
-  origin: process.env.FRONTEND_URL,
-  methods: ["GET", "POST"],
-};
-
-// Khởi tạo Socket.IO
-// socketModule.init(server, { cors: corsOptions });
 
 // Cấu hình session
 app.use(
@@ -120,7 +119,7 @@ const voucherRouter = require("./routes/voucher.routes.js");
 const canceledItemOrderRouter = require("./routes/canceledItem.routes.js")
 
 // Đăng ký routes
-app.use("/item", upload.none(), itemRouter);
+app.use("/item", itemRouter);
 app.use("/users", userRoutes);
 app.use("/tables", tableRouter);
 app.use("/orders", orderRouter);

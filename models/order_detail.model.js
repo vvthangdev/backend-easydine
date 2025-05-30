@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const orderDetailSchema = new mongoose.Schema({
-  customer_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  customer_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   staff_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   time: { type: Date, default: Date.now },
   type: { type: String, enum: ["reservation", "takeaway"], required: true },
