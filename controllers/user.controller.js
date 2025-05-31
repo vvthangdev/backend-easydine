@@ -8,7 +8,10 @@ const { Auth } = require("two-step-auth");
 
 const getAllUsers = async (req, res) => {
   try {
-    const users = await userService.getAllUsers();
+    const users = await userService.getAllUsers({
+      refresh_token: 0, // Loại bỏ refresh_token
+      password: 0, // Loại bỏ password
+    });
 
     return res.status(200).json({
       status: "SUCCESS",
@@ -168,6 +171,9 @@ const login = async (req, res) => {
         email: user.email,
         username: user.username,
         phone: user.phone,
+        googleId: user.googleId,
+        isActive: user.isActive,
+        phone: user.phone,
         accessToken: `Bearer ${accessToken}`,
         refreshToken: `Bearer ${refreshToken}`,
       },
@@ -183,7 +189,8 @@ const login = async (req, res) => {
 };
 
 const refreshToken = async (req, res) => {
-  const refreshToken = req.headers["authorization"]?.split(" ")[1];
+  const {refreshToken} = req.body;
+  // console.log(`vvt check refreshtoken: ${refreshToken}`)
 
   if (!refreshToken) {
     return res.status(403).json({
@@ -270,7 +277,8 @@ const updateUser = async (req, res) => {
 
     const updatedUser = await userService.updateUser(
       req.user.username,
-      otherFields
+      otherFields,
+      { refresh_token: 0, password: 0 }
     );
     if (!updatedUser) {
       return res.status(404).json({
@@ -283,7 +291,7 @@ const updateUser = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Cập nhật người dùng thành công!",
-      data: updatedUser,
+      data: null,
     });
   } catch (error) {
     console.error("Lỗi khi cập nhật người dùng:", error);
@@ -336,8 +344,6 @@ const deleteUser = async (req, res) => {
     });
   }
 };
-
-
 
 const sendOTP = async (req, res) => {
   try {
@@ -479,7 +485,9 @@ const googleLoginCallback = async (req, res) => {
       refreshToken = user.refresh_token;
     }
 
-    const redirectUrl = `${process.env.FRONTEND_URL}/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
+    const redirectUrl = `${
+      process.env.FRONTEND_URL
+    }/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
       JSON.stringify({
         id: user._id,
         name: user.name,
@@ -494,50 +502,73 @@ const googleLoginCallback = async (req, res) => {
     return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Lỗi khi đăng nhập Google:", error);
-    return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_login_failed`);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/login?error=google_login_failed`
+    );
   }
 };
 
-const handlePaymentReturn = async (req, res) => {
+const changePassword = async (req, res) => {
   try {
-    const vnp_Params = req.query;
-    const vnp_SecureHash = vnp_Params.vnp_SecureHash;
-    delete vnp_Params.vnp_SecureHash;
-    delete vnp_Params.vnp_SecureHashType;
+    const { oldPassword, newPassword } = req.body;
 
-    // Sắp xếp params để kiểm tra hash
-    const sortedParams = Object.keys(vnp_Params)
-      .sort()
-      .reduce((obj, key) => {
-        obj[key] = vnp_Params[key];
-        return obj;
-      }, {});
-    const signData = querystring.stringify(sortedParams);
-    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
-
-    const order_id = vnp_Params.vnp_TxnRef;
-    const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
-
-    // Kiểm tra checksum
-    if (calculatedHash !== vnp_SecureHash) {
-      return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Invalid secure hash`);
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Mật khẩu cũ và mới là bắt buộc!",
+        data: null,
+      });
     }
 
-    // Kiểm tra trạng thái giao dịch
-    if (vnp_ResponseCode === "00") {
-      return res.redirect(`${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}`);
-    } else {
-      return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=Transaction failed with code ${vnp_ResponseCode}`
-      );
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy người dùng!",
+        data: null,
+      });
     }
+
+    if (user.googleId && !user.password) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Tài khoản Google không thể đổi mật khẩu theo cách này!",
+        data: null,
+      });
+    }
+
+    const isPasswordValid = await userService.validatePassword(
+      oldPassword,
+      user.password
+    );
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        status: "ERROR",
+        message: "Mật khẩu cũ không đúng!",
+        data: null,
+      });
+    }
+
+    const saltRounds = 10;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+    await userService.updateUser(req.user.username, {
+      password: hashedNewPassword,
+    });
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Đổi mật khẩu thành công!",
+      data: null,
+    });
   } catch (error) {
-    return res.redirect(`${process.env.FRONTEND_URL}/payment-failed?message=Error processing payment`);
+    console.error("Lỗi khi đổi mật khẩu:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Đã xảy ra lỗi khi đổi mật khẩu!",
+      data: null,
+    });
   }
 };
-
-
 
 module.exports = {
   getAllUsers,
@@ -552,5 +583,5 @@ module.exports = {
   searchUsers,
   getUserById,
   googleLoginCallback,
-  handlePaymentReturn,
+  changePassword,
 };

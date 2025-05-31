@@ -13,7 +13,9 @@ module.exports = function (passport) {
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
-          let user = await User.findOne({ googleId: profile.id }) || await User.findOne({ email: profile.emails[0].value });
+          let user =
+            (await User.findOne({ googleId: profile.id })) ||
+            (await User.findOne({ email: profile.emails[0].value }));
 
           if (user) {
             user.googleId = profile.id;
@@ -21,8 +23,11 @@ module.exports = function (passport) {
             user.name = profile.displayName || user.name;
             await user.save();
           } else {
-            const randomPassword = Math.random().toString(36).slice(-8);
-            const hashedPassword = await bcrypt.hash(randomPassword, 10);
+            // const randomPassword = Math.random().toString(36).slice(-8);
+            // const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+            const defaultPassword = "12345678"; // Mật khẩu mặc định
+            const hashedPassword = await bcrypt.hash(defaultPassword, 10); // Mã hóa mật khẩu
 
             user = new User({
               googleId: profile.id,

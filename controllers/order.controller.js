@@ -2293,6 +2293,151 @@ const testNewOrder2 = async (req, res) => {
   }
 };
 
+const payOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { order_id, payment_method } = req.body;
+
+    // Kiểm tra đầu vào
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Yêu cầu phải có order_id hợp lệ!",
+        data: null,
+      });
+    }
+    if (!payment_method || !["cash", "bank_transfer"].includes(payment_method)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Phương thức thanh toán phải là 'cash' hoặc 'bank_transfer'!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    if (!order) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy đơn hàng!",
+        data: null,
+      });
+    }
+    if (order.status !== "confirmed") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
+        data: null,
+      });
+    }
+    if (order.payment_status === "success") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Đơn hàng đã được thanh toán!",
+        data: null,
+      });
+    }
+
+    // Tính tổng số tiền
+    const total_amount = await calculateOrderTotal(order_id);
+    if (total_amount <= 0) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Đơn hàng không có mặt hàng hợp lệ hoặc tổng số tiền bằng 0!",
+        data: null,
+      });
+    }
+
+    let discount_amount = 0;
+    let final_amount = total_amount;
+
+    // Xử lý voucher nếu có
+    if (order.voucher_id) {
+      const voucher = await mongoose.model("Voucher").findById(order.voucher_id).session(session);
+      if (!voucher) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: "Không tìm thấy voucher!",
+          data: null,
+        });
+      }
+      if (voucher.discountType === "percentage") {
+        discount_amount = (voucher.discount / 100) * total_amount;
+      } else {
+        discount_amount = voucher.discount;
+      }
+      final_amount = total_amount - discount_amount;
+      if (final_amount < 0) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: "Số tiền cuối cùng không thể âm!",
+          data: null,
+        });
+      }
+    }
+
+    // Cập nhật thông tin đơn hàng
+    const updatedOrder = await mongoose.model("OrderDetail").findByIdAndUpdate(
+      order_id,
+      {
+        cashier_id: req.user._id,
+        total_amount,
+        discount_amount,
+        final_amount,
+        payment_method,
+        status: "completed",
+        payment_status: "success",
+        payment_initiated_at: new Date(),
+        transaction_id: `TX-${order_id}-${Date.now()}`,
+      },
+      { new: true, session }
+    );
+
+    // Hoàn tất giao dịch
+    await session.commitTransaction();
+
+    // Gửi thông báo Socket.IO
+    const io = socket.getIO();
+    io.to("adminRoom").emit("orderPaid", {
+      orderId: updatedOrder._id.toString(),
+      payment_method,
+      final_amount,
+      status: updatedOrder.status,
+      message: `Đơn hàng ${updatedOrder._id} đã được thanh toán bằng ${payment_method}`,
+    });
+
+    // Gửi email xác nhận thanh toán (không chặn luồng chính)
+    setImmediate(async () => {
+      try {
+        const user = await getUserByUserId(updatedOrder.customer_id);
+        await emailService.sendOrderPaymentConfirmationEmail(
+          user.email,
+          user.name,
+          updatedOrder
+        );
+      } catch (emailError) {
+        console.error("Lỗi gửi email:", emailError.message);
+      }
+    });
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Thanh toán đơn hàng thành công!",
+      data: updatedOrder,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Đã xảy ra lỗi khi xử lý thanh toán!",
+      data: null,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 module.exports = {
   getAllOrders,
   getAllOrdersInfo,
@@ -2310,6 +2455,7 @@ module.exports = {
   handlePaymentIPN,
   addItemsToOrder,
   cancelItems,
+  payOrder,
   testNewOrder,
   testNewOrder2,
 };

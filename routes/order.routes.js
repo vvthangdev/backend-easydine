@@ -82,6 +82,12 @@ router.post(
   orderController.cancelItems
 );
 
+router.post(
+  "/pay-order",
+  authMiddleware.authenticateToken,
+  orderController.payOrder
+);
+
 router.get("/test01", orderController.testNewOrder)
 
 router.get("/test02", orderController.testNewOrder2)

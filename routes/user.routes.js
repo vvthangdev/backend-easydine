@@ -74,4 +74,10 @@ router.get(
   userController.googleLoginCallback
 );
 
+router.post(
+  "/change-password",
+  authMiddleware.authenticateToken,
+  userController.changePassword
+);
+
 module.exports = router;

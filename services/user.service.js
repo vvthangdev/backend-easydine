@@ -1,9 +1,11 @@
 const bcrypt = require("bcrypt");
 const User = require("../models/user.model");
 
-async function getAllUsers() {
+async function getAllUsers(projection = {}) {
   try {
-    const users = await User.find();
+    const users = await User.find({}, projection);
+    console.log("vvt check 01: users =", JSON.stringify(users, null, 2));
+    console.log("vvt check 01: projection =", JSON.stringify({ refresh_token: 0, password: 0 }, null, 2));
     return users;
   } catch (error) {
     console.error("Error fetching all users:", error);
@@ -120,13 +122,23 @@ async function updateRefreshToken(username, refreshToken) {
   }
 }
 
-const updateUser = async (username, updatedData) => {
-  const user = await User.findOne({ username });
-  if (!user) throw new Error("User not found");
-
-  Object.assign(user, updatedData);
-  await user.save();
-  return user;
+const updateUser = async (username, updatedData, projection = {}) => {
+  try {
+    const user = await User.findOneAndUpdate(
+      { username },
+      { $set: updatedData },
+      { new: true, projection }
+    );
+    if (!user) {
+      throw new Error("User not found");
+    }
+    console.log(`vvt check: ${user} and ${projection}`)
+    console.log("vvt check 01: projection =", JSON.stringify({ refresh_token: 0, password: 0 }, null, 2));
+    return user;
+  } catch (error) {
+    console.error("Error updating user:", error);
+    throw new Error("An error occurred while updating the user.");
+  }
 };
 
 const deleteUser = async (username) => {
