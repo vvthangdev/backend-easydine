@@ -93,6 +93,9 @@ async function getUserByUserName(username) {
 }
 
 async function getUserByUserId(userId) {
+  if (!userId || userId === "null") {
+    throw new Error("Invalid user ID");
+  }
   return await User.findById(userId, { refresh_token: 0, password: 0 });
 }
 

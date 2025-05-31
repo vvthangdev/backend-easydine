@@ -61,52 +61,6 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// app.get("/api/admin-sockets", (req, res) => {
-//   const adminSockets = socketModule.getAdminSockets();
-//   const connectedAdmins = Array.from(adminSockets.keys());
-
-//   res.json({
-//     status: "SUCCESS",
-//     message: "List of connected admin sockets",
-//     data: {
-//       count: connectedAdmins.length,
-//       adminIds: connectedAdmins,
-//     },
-//   });
-// });
-
-// API test thông báo đơn hàng mới
-// app.post("/api/test-new-order", (req, res) => {
-//   try {
-//     const io = socketModule.getIO();
-//     const notification = {
-//       orderId: "test123",
-//       customerId: "test789",
-//       type: "reservation",
-//       status: "pending",
-//       staffId: null,
-//       time: new Date().toISOString(),
-//       createdAt: new Date().toISOString(),
-//       message: "Test new order notification",
-//     };
-
-//     console.log("Sending newOrder notification to adminRoom:", notification);
-//     console.log("Current adminRoom sockets:", io.sockets.adapter.rooms.get('adminRoom')?.size || 0);
-//     io.to('adminRoom').emit("newOrder", notification);
-
-//     res.json({
-//       status: "SUCCESS",
-//       message: "Test newOrder notification sent",
-//       data: notification,
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       status: "ERROR",
-//       message: error.message
-//     });
-//   }
-// });
-
 // Import routes
 const connectDB = require("./config/db.config.js");
 const userRoutes = require("./routes/user.routes.js");
@@ -127,6 +81,8 @@ app.use("/item-order", itemOrdRouter);
 app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
 app.use("/canceled-item-orders", canceledItemOrderRouter)
+
+require('./utils/scheduler.js');
 
 // Khởi động server
 const PORT = process.env.PORT || 8080;

@@ -23,6 +23,47 @@ const getAllTables = async (req, res) => {
   }
 };
 
+const getTableById = async (req, res) => {
+  try {
+    const { table_id } = req.query;
+
+    if (!table_id || !mongoose.Types.ObjectId.isValid(table_id)) {
+      return res.status(400).json({
+        status: 'ERROR',
+        message: 'table_id hợp lệ là bắt buộc!',
+        data: null,
+      });
+    }
+
+    const table = await TableInfo.findById(table_id).select('table_number capacity area').lean();
+    if (!table) {
+      return res.status(404).json({
+        status: 'ERROR',
+        message: 'Không tìm thấy bàn!',
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      status: 'SUCCESS',
+      message: 'Lấy thông tin bàn thành công!',
+      data: {
+        table_id: table._id,
+        table_number: table.table_number,
+        capacity: table.capacity,
+        area: table.area,
+      },
+    });
+  } catch (error) {
+    console.error('Lỗi khi lấy thông tin bàn:', error);
+    return res.status(500).json({
+      status: 'ERROR',
+      message: 'Đã xảy ra lỗi khi lấy thông tin bàn!',
+      data: null,
+    });
+  }
+};
+
 const createTable = async (req, res) => {
   try {
     const { table_number, capacity, area } = req.body;
@@ -330,6 +371,7 @@ const getAvailableTables = async (req, res) => {
 
 module.exports = {
   getAllTables,
+  getTableById,
   createTable,
   updateTable,
   deleteTable,

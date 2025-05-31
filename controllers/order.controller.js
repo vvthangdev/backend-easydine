@@ -21,13 +21,13 @@ const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { start_time, end_time, tables, items, ...orderData } = req.body;
+    const { start_time, tables, items, ...orderData } = req.body;
 
     // Kiểm tra dữ liệu đầu vào
-    if (!start_time || !end_time) {
+    if (!start_time) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Yêu cầu phải có start_time và end_time!",
+        message: "Yêu cầu phải có start_time!",
         data: null,
       });
     }
@@ -38,7 +38,10 @@ const createOrder = async (req, res) => {
         data: null,
       });
     }
-
+// Tính endTime từ start_time và offset từ .env
+    const startTime = new Date(start_time);
+    const reservationDuration = parseInt(process.env.RESERVATION_DURATION_MINUTES) || 240;
+    const endTime = new Date(startTime.getTime() + reservationDuration * 60 * 1000);
     // Kiểm tra tính hợp lệ của table_id
     if (orderData.type === "reservation") {
       for (const tableId of tables) {
@@ -63,8 +66,6 @@ const createOrder = async (req, res) => {
 
     // Xử lý đặt bàn nếu là reservation
     if (orderData.type === "reservation") {
-      const startTime = new Date(start_time);
-      const endTime = new Date(end_time);
 
       const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(
         session
@@ -194,13 +195,13 @@ const createTableOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { start_time, end_time, tables, items, ...orderData } = req.body;
+    const { start_time, tables, items, ...orderData } = req.body;
 
     // Kiểm tra dữ liệu đầu vào
-    if (!start_time || !end_time) {
+    if (!start_time) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Yêu cầu phải có start_time và end_time!",
+        message: "Yêu cầu phải có start_time!",
         data: null,
       });
     }
@@ -225,6 +226,11 @@ const createTableOrder = async (req, res) => {
       }
     }
 
+    // Tính endTime từ start_time và offset từ .env
+    const startTime = new Date(start_time);
+    const reservationDuration = parseInt(process.env.RESERVATION_TABLE_DURATION_MINUTES) || 120;
+    const endTime = new Date(startTime.getTime() + reservationDuration * 60 * 1000);
+
     // Tạo dữ liệu đơn hàng mới
     const newOrderData = {
       customer_id: null, // Không yêu cầu customer_id
@@ -238,10 +244,6 @@ const createTableOrder = async (req, res) => {
 
     // Tạo đơn hàng
     const newOrder = await orderService.createOrder(newOrderData, { session });
-
-    // Xử lý đặt bàn
-    const startTime = new Date(start_time);
-    const endTime = new Date(end_time);
 
     const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(session);
     if (tableInfos.length !== tables.length) {
@@ -672,6 +674,7 @@ const getOrderInfo = async (req, res) => {
           id: order._id,
           customer_id: order.customer_id,
           staff_id: order.staff_id,
+          cashier_id: order.cashier_id,
           time: order.time,
           type: order.type,
           status: order.status,
@@ -1291,7 +1294,10 @@ function sortObject(obj) {
 const createPayment = async (req, res) => {
   try {
     const { order_id, bank_code, language, txtexpire } = req.body;
-
+    console.log(`vvt check: ${req.user._id}`)
+// if (orderData.status === "confirmed") {
+//       newOrderData.staff_id = req.user._id;
+//     }
     // Kiểm tra đầu vào
     if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
       return res.status(400).json({
@@ -1374,6 +1380,7 @@ const createPayment = async (req, res) => {
 
     // Cập nhật OrderDetail
     await mongoose.model("OrderDetail").findByIdAndUpdate(order_id, {
+      cashier_id: req.user._id,
       total_amount,
       discount_amount,
       final_amount,
