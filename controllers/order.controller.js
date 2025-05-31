@@ -7,7 +7,7 @@ const Item = require("../models/item.model");
 const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
-const { calculateOrderTotal } = require ("../services/voucher.service")
+const { calculateOrderTotal } = require("../services/voucher.service");
 
 const moment = require("moment");
 const qs = require("qs");
@@ -15,7 +15,6 @@ const qs = require("qs");
 const socket = require("../socket/socket");
 const crypto = require("crypto");
 const mongoose = require("mongoose");
-
 
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -38,10 +37,13 @@ const createOrder = async (req, res) => {
         data: null,
       });
     }
-// Tính endTime từ start_time và offset từ .env
+    // Tính endTime từ start_time và offset từ .env
     const startTime = new Date(start_time);
-    const reservationDuration = parseInt(process.env.RESERVATION_DURATION_MINUTES) || 240;
-    const endTime = new Date(startTime.getTime() + reservationDuration * 60 * 1000);
+    const reservationDuration =
+      parseInt(process.env.RESERVATION_DURATION_MINUTES) || 240;
+    const endTime = new Date(
+      startTime.getTime() + reservationDuration * 60 * 1000
+    );
     // Kiểm tra tính hợp lệ của table_id
     if (orderData.type === "reservation") {
       for (const tableId of tables) {
@@ -66,7 +68,6 @@ const createOrder = async (req, res) => {
 
     // Xử lý đặt bàn nếu là reservation
     if (orderData.type === "reservation") {
-
       const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(
         session
       );
@@ -228,8 +229,11 @@ const createTableOrder = async (req, res) => {
 
     // Tính endTime từ start_time và offset từ .env
     const startTime = new Date(start_time);
-    const reservationDuration = parseInt(process.env.RESERVATION_TABLE_DURATION_MINUTES) || 120;
-    const endTime = new Date(startTime.getTime() + reservationDuration * 60 * 1000);
+    const reservationDuration =
+      parseInt(process.env.RESERVATION_TABLE_DURATION_MINUTES) || 120;
+    const endTime = new Date(
+      startTime.getTime() + reservationDuration * 60 * 1000
+    );
 
     // Tạo dữ liệu đơn hàng mới
     const newOrderData = {
@@ -245,12 +249,20 @@ const createTableOrder = async (req, res) => {
     // Tạo đơn hàng
     const newOrder = await orderService.createOrder(newOrderData, { session });
 
-    const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(session);
+    const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(
+      session
+    );
     if (tableInfos.length !== tables.length) {
       throw new Error("Một hoặc nhiều table_id không tồn tại!");
     }
 
-    const unavailableTables = await orderService.checkUnavailableTables(startTime, endTime, tables, null, { session });
+    const unavailableTables = await orderService.checkUnavailableTables(
+      startTime,
+      endTime,
+      tables,
+      null,
+      { session }
+    );
     if (unavailableTables.length > 0) {
       throw new Error("Một số bàn đã chọn không khả dụng!");
     }
@@ -272,8 +284,12 @@ const createTableOrder = async (req, res) => {
         return new mongoose.Types.ObjectId(item.id);
       });
 
-      const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
-      const itemMap = new Map(foundItems.map((item) => [item._id.toString(), item]));
+      const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+        session
+      );
+      const itemMap = new Map(
+        foundItems.map((item) => [item._id.toString(), item])
+      );
 
       for (const item of items) {
         if (!item.quantity || item.quantity < 1) {
@@ -286,7 +302,9 @@ const createTableOrder = async (req, res) => {
         if (item.size) {
           const validSize = itemExists.sizes.find((s) => s.name === item.size);
           if (!validSize) {
-            throw new Error(`Kích thước ${item.size} không hợp lệ cho mục hàng ${itemExists.name}!`);
+            throw new Error(
+              `Kích thước ${item.size} không hợp lệ cho mục hàng ${itemExists.name}!`
+            );
           }
         }
       }
@@ -622,6 +640,9 @@ const getOrderInfo = async (req, res) => {
         data: null,
       });
     }
+
+    // Cập nhật giá đơn hàng
+    await orderService.updateOrderAmounts(order._id);
 
     // Lấy thông tin bàn
     const reservedTables = await ReservedTable.find({
@@ -1005,6 +1026,14 @@ const splitOrder = async (req, res) => {
         null,
     }));
 
+    // Cập nhật giá cho đơn hàng gốc và đơn hàng mới
+    await orderService.updateOrderAmounts(originalOrder._id, session);
+    await orderService.updateOrderAmounts(newOrder._id, session);
+
+    // Tải lại thông tin đơn hàng để lấy giá trị cập nhật
+    const updatedOriginalOrder = await OrderDetail.findById(originalOrder._id).session(session);
+    const updatedNewOrder = await OrderDetail.findById(newOrder._id).session(session);
+
     await session.commitTransaction();
 
     return res.status(200).json({
@@ -1164,7 +1193,9 @@ const mergeOrder = async (req, res) => {
     targetOrder.updated_at = new Date();
     await targetOrder.save({ session });
 
-    // Cam kết transaction
+    // Cập nhật giá cho đơn hàng đích
+    await orderService.updateOrderAmounts(targetOrder._id, session);
+
     await session.commitTransaction();
 
     // Lấy thông tin chi tiết cho response (sau transaction)
@@ -1262,6 +1293,20 @@ const mergeOrder = async (req, res) => {
       }
     });
 
+    setImmediate(async () => {
+      const newSession = await mongoose.startSession();
+      newSession.startTransaction();
+      try {
+        await orderService.updateOrderAmounts(targetOrder._id, newSession);
+        await newSession.commitTransaction();
+      } catch (error) {
+        await newSession.abortTransaction();
+        console.error("Error updating order amounts:", error.message);
+      } finally {
+        newSession.endSession();
+      }
+    });
+
     return res.status(200).json(response);
   } catch (error) {
     await session.abortTransaction();
@@ -1294,10 +1339,10 @@ function sortObject(obj) {
 const createPayment = async (req, res) => {
   try {
     const { order_id, bank_code, language, txtexpire } = req.body;
-    console.log(`vvt check: ${req.user._id}`)
-// if (orderData.status === "confirmed") {
-//       newOrderData.staff_id = req.user._id;
-//     }
+    console.log(`vvt check: ${req.user._id}`);
+    // if (orderData.status === "confirmed") {
+    //       newOrderData.staff_id = req.user._id;
+    //     }
     // Kiểm tra đầu vào
     if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
       return res.status(400).json({
