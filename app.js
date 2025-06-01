@@ -82,7 +82,7 @@ app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
 app.use("/canceled-item-orders", canceledItemOrderRouter)
 
-// require('./utils/scheduler.js');
+require('./utils/scheduler.js');
 
 // Khởi động server
 const PORT = process.env.PORT || 8080;

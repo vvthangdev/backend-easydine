@@ -588,7 +588,9 @@ const getOrderInfo = async (req, res) => {
       });
     }
 
-    let order;
+    const currentTime = new Date(); // Thời gian UTC
+
+    let orders = [];
 
     // Tìm đơn hàng theo ID
     if (id) {
@@ -599,9 +601,10 @@ const getOrderInfo = async (req, res) => {
           data: null,
         });
       }
-      order = await OrderDetail.findById(id)
-        .populate("voucher_id", "code") // Populate chỉ lấy trường code
+      const order = await OrderDetail.findById(id)
+        .populate("voucher_id", "code")
         .lean();
+      if (order) orders.push(order);
     }
     // Tìm đơn hàng theo table_id
     else if (table_id) {
@@ -613,38 +616,48 @@ const getOrderInfo = async (req, res) => {
         });
       }
 
-      const currentTime = new Date();
-      const reservedTable = await ReservedTable.findOne({
+      // Tìm tất cả đặt bàn hợp lệ
+      const reservedTables = await ReservedTable.find({
         table_id: new mongoose.Types.ObjectId(table_id),
         start_time: { $lte: currentTime },
         end_time: { $gte: currentTime },
       }).lean();
 
-      if (!reservedTable) {
+      if (!reservedTables.length) {
         return res.status(404).json({
           status: "ERROR",
-          message: `No active order found for table_id ${table_id} at current UTC time (${currentTime.toISOString()})!`,
+          message: `No active orders found for table_id ${table_id} at current UTC time (${currentTime.toISOString()})!`,
           data: null,
         });
       }
 
-      order = await OrderDetail.findById(reservedTable.reservation_id)
+      // Lấy danh sách reservation_id
+      const orderIds = reservedTables.map((rt) => rt.reservation_id);
+
+      // Tìm đơn hàng pending hoặc confirmed
+      orders = await OrderDetail.find({
+        _id: { $in: orderIds },
+        status: { $in: ["pending", "confirmed"] },
+      })
         .populate("voucher_id", "code")
         .lean();
     }
 
-    if (!order) {
+    if (!orders.length) {
       return res.status(404).json({
         status: "ERROR",
-        message: "Order not found!",
+        message: "No active orders found!",
         data: null,
       });
     }
 
-    // Cập nhật giá đơn hàng
+    // Chỉ lấy đơn hàng đầu tiên (đảm bảo chỉ có 1 đơn pending hoặc confirmed)
+    const order = orders[0];
+
+    // Cập nhật giá cho đơn hàng
     await orderService.updateOrderAmounts(order._id);
 
-    // Lấy thông tin bàn
+    // Lấy thông tin bàn và món ăn cho đơn hàng
     const reservedTables = await ReservedTable.find({
       reservation_id: order._id,
     }).lean();
@@ -656,63 +669,60 @@ const getOrderInfo = async (req, res) => {
       area: table.area,
       capacity: table.capacity,
       status: order.status === "pending" ? "Reserved" : "Occupied",
-      start_time:
-        reservedTables.find((rt) => rt.table_id.equals(table._id))
-          ?.start_time || null,
-      end_time:
-        reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time ||
-        null,
+      start_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.start_time || null,
+      end_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time || null,
+      people_assigned: reservedTables.find((rt) => rt.table_id.equals(table._id))?.people_assigned || null,
     }));
 
     // Lấy thông tin món ăn
     const itemOrders = await ItemOrder.find({ order_id: order._id }).lean();
-    const enrichedItemOrders = await Promise.all(
-      itemOrders.map(async (itemOrder) => {
-        const item = await Item.findById(itemOrder.item_id).lean();
-        const sizeInfo =
-          item && itemOrder.size && item.sizes
-            ? item.sizes.find((s) => s.name === itemOrder.size)
-            : null;
-        return {
-          _id: itemOrder._id,
-          item_id: itemOrder.item_id,
-          quantity: itemOrder.quantity,
-          order_id: itemOrder.order_id,
-          size: itemOrder.size,
-          note: itemOrder.note,
-          itemName: item ? item.name : null,
-          itemImage: item ? item.image : null,
-          itemPrice: sizeInfo ? sizeInfo.price : item ? item.price : null,
-        };
-      })
-    );
+    const itemIds = itemOrders.map((io) => io.item_id);
+    const items = await Item.find({ _id: { $in: itemIds } }).lean();
+    const itemMap = new Map(items.map((item) => [item._id.toString(), item]));
+    const enrichedItemOrders = itemOrders.map((itemOrder) => {
+      const item = itemMap.get(itemOrder.item_id.toString());
+      const sizeInfo = item && itemOrder.size ? item.sizes.find((s) => s.name === itemOrder.size) : null;
+      return {
+        _id: itemOrder._id,
+        item_id: item ? item._id : itemOrder.item_id,
+        quantity: itemOrder.quantity,
+        order_id: itemOrder.order_id,
+        size: itemOrder.size,
+        note: itemOrder.note,
+        itemName: item ? item.name : null,
+        itemImage: item ? item.image : null,
+        itemPrice: sizeInfo ? sizeInfo.price : item ? item.price : null,
+      };
+    });
+
+    const enrichedOrder = {
+      order: {
+        id: order._id,
+        customer_id: order.customer_id,
+        staff_id: order.staff_id,
+        cashier_id: order.cashier_id,
+        time: order.time,
+        type: order.type,
+        status: order.status,
+        voucher_code: order.voucher_id ? order.voucher_id.code : null,
+        total_amount: order.total_amount,
+        discount_amount: order.discount_amount,
+        final_amount: order.final_amount,
+        payment_methods: order.payment_method ? [{ method: order.payment_method, amount: order.final_amount }] : [],
+        payment_status: order.payment_status || "pending",
+        star: order.star || null,
+        comment: order.comment || null,
+        transaction_id: order.transaction_id || null,
+        vnp_transaction_no: order.vnp_transaction_no || null,
+      },
+      reservedTables: enrichedTables,
+      itemOrders: enrichedItemOrders,
+    };
 
     return res.status(200).json({
       status: "SUCCESS",
       message: "Order details fetched successfully!",
-      data: {
-        order: {
-          id: order._id,
-          customer_id: order.customer_id,
-          staff_id: order.staff_id,
-          cashier_id: order.cashier_id,
-          time: order.time,
-          type: order.type,
-          status: order.status,
-          voucher_code: order.voucher_id ? order.voucher_id.code : null, // Trả về code thay vì voucher_id
-          total_amount: order.total_amount,
-          discount_amount: order.discount_amount,
-          final_amount: order.final_amount,
-          payment_method: order.payment_method || null,
-          payment_status: order.payment_status || "pending",
-          star: order.star || null,
-          comment: order.comment || null,
-          transaction_id: order.transaction_id || null,
-          vnp_transaction_no: order.vnp_transaction_no || null,
-        },
-        reservedTables: enrichedTables,
-        itemOrders: enrichedItemOrders,
-      },
+      data: enrichedOrder, // Trả về một object thay vì mảng
     });
   } catch (error) {
     console.error("Error in getOrderInfo:", error);
