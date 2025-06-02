@@ -528,7 +528,7 @@ const updateOrder = async (req, res) => {
     const response = {
       status: "SUCCESS",
       message: "Order updated successfully!",
-      data: updatedOrder,
+      data: "",
     };
 
     if (otherFields.status) {
@@ -655,7 +655,7 @@ const getOrderInfo = async (req, res) => {
     const order = orders[0];
 
     // Cập nhật giá cho đơn hàng
-    await orderService.updateOrderAmounts(order._id);
+    // await orderService.updateOrderAmounts(order._id);
 
     // Lấy thông tin bàn và món ăn cho đơn hàng
     const reservedTables = await ReservedTable.find({

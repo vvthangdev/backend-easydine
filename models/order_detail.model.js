@@ -5,6 +5,7 @@ const orderDetailSchema = new mongoose.Schema({
   staff_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   cashier_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   time: { type: Date, default: Date.now },
+  number_people: { type: Number, default: 1 },
   type: { type: String, enum: ["reservation", "takeaway"], required: true },
   status: {
     type: String,

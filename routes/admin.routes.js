@@ -51,4 +51,6 @@ router.get(
   adminController.getAllStaff
 );
 
+router.post("/webhook/payment", adminController.handlePaymentWebhook);
+
 module.exports = router;

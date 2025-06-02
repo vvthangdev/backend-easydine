@@ -2,6 +2,7 @@ const { Server } = require("socket.io");
 const { authMiddleware } = require("./middleware/auth.middleware");
 const { registerEventHandlers } = require("./handlers/event.handler");
 
+
 let io;
 
 const socket = {

@@ -1,6 +1,8 @@
 const User = require("../models/user.model.js");
+const OrderDetail = require("../models/order_detail.model.js")
 require("dotenv").config();
 const userService = require("../services/user.service");
+const { getIO } = require("../socket/socket.js")
 const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 
@@ -282,6 +284,74 @@ const getAllStaff = async (req, res) => {
     });
   }
 };
+
+const handlePaymentWebhook = async (req, res) => {
+  try {
+    // Dữ liệu webhook gửi về là một mảng, lấy object đầu tiên
+    const webhookData = req.body;
+    console.log(webhookData)
+    if (!webhookData) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Invalid webhook data format",
+      });
+    }
+
+    const { orderId, tenTaiKhoanDoiUng, soTaiKhoanDoiUng, ngayDienRa, giaTri } = webhookData;
+
+    // Kiểm tra dữ liệu đầu vào
+    if (!orderId || !giaTri || !ngayDienRa) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "orderId, giaTri, và ngayDienRa là bắt buộc!",
+      });
+    }
+
+    // Lấy customerId từ database dựa trên orderId
+    const order = await OrderDetail.findById(orderId);
+    if (!order) {
+      console.log(`[${new Date().toISOString()}] [Webhook] Order ${orderId} not found, still sending notification to adminRoom`);
+    }
+
+    // Tạo thông báo
+    const notification = {
+      type: "PAYMENT_SUCCESS",
+      orderId,
+      customerId: order?.customer_id?.toString() || null,
+      accountName: tenTaiKhoanDoiUng || "Unknown",
+      accountNumber: soTaiKhoanDoiUng || "N/A",
+      transactionTime: ngayDienRa,
+      amount: giaTri,
+      message: `Payment successful for order ${orderId} at ${ngayDienRa} with amount ${giaTri}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Gửi thông báo qua Socket.IO
+    const io = getIO();
+    console.log(`[${new Date().toISOString()}] [Webhook] Sending paymentSuccess notification:`, notification);
+
+    // Gửi đến adminRoom
+    io.to("adminRoom").emit("paymentSuccess", notification);
+
+    // Gửi đến khách hàng nếu có customerId
+    if (order?.customer_id) {
+      io.to(`user:${order.customer_id}`).emit("paymentSuccess", notification);
+    } else {
+      console.log(`[${new Date().toISOString()}] [Webhook] No customerId found for order ${orderId}`);
+    }
+
+    return res.status(200).json({
+      status: "OK",
+      message: "Webhook received and notification sent",
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] [Webhook] Error processing webhook:`, error.message);
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Failed to process webhook",
+    });
+  }
+};
 module.exports = {
   deleteUserByAdmin,
   updateUserByAdmin,
@@ -289,4 +359,5 @@ module.exports = {
   activateUser,
   adminGetUserInfo,
   getAllStaff,
+  handlePaymentWebhook
 };
