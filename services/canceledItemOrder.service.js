@@ -7,11 +7,35 @@ const createCanceledItemOrder = async (data) => {
 };
 
 const getAllCanceledItemOrders = async () => {
-  return await CanceledItemOrder.find().populate("item_id order_id canceled_by");
+  return await CanceledItemOrder.find()
+    .populate({
+      path: "item_id",
+      select: "_id name price image" // Chỉ lấy các trường cần thiết
+    })
+    .populate({
+      path: "order_id",
+      select: "_id type status total_amount final_amount" // Chỉ lấy các trường cần thiết
+    })
+    .populate({
+      path: "canceled_by",
+      select: "_id username name role" // Chỉ lấy các trường cần thiết
+    });
 };
 
 const getCanceledItemOrderById = async (id) => {
-  return await CanceledItemOrder.findById(id).populate("item_id order_id canceled_by");
+  return await CanceledItemOrder.findById(id)
+    .populate({
+      path: "item_id",
+      select: "_id name price image"
+    })
+    .populate({
+      path: "order_id",
+      select: "_id type status total_amount final_amount"
+    })
+    .populate({
+      path: "canceled_by",
+      select: "_id username name role"
+    });
 };
 
 const updateCanceledItemOrder = async (id, updateData) => {

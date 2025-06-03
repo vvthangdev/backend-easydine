@@ -32,12 +32,12 @@ const createCanceledItemOrder = async (req, res) => {
       canceled_by,
     };
 
-    const canceledItemOrder = await canceledItemOrderService.createCanceledItemOrder(canceledItemOrderData);
+    await canceledItemOrderService.createCanceledItemOrder(canceledItemOrderData);
 
     return res.status(201).json({
       status: "SUCCESS",
       message: "Tạo bản ghi hủy món hàng thành công!",
-      data: canceledItemOrder,
+      data: "", // Return empty string
     });
   } catch (error) {
     console.error("Lỗi khi tạo bản ghi hủy món hàng:", error);
@@ -55,7 +55,7 @@ const getAllCanceledItemOrders = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Retrieved all canceled item orders successfully!",
-      data: canceledItemOrders,
+      data: canceledItemOrders, // Keep returning documents
     });
   } catch (error) {
     console.error("Error retrieving canceled item orders:", error);
@@ -99,7 +99,7 @@ const getCanceledItemOrderById = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Retrieved canceled item order successfully!",
-      data: canceledItemOrder,
+      data: canceledItemOrder, // Keep returning document
     });
   } catch (error) {
     console.error("Error retrieving canceled item order:", error);
@@ -140,7 +140,6 @@ const updateCanceledItemOrder = async (req, res) => {
       });
     }
 
-    // Validate ObjectIds in updateData if present
     if (updateData.item_id && !mongoose.isValidObjectId(updateData.item_id)) {
       return res.status(400).json({
         status: "ERROR",
@@ -168,7 +167,7 @@ const updateCanceledItemOrder = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Updated canceled item order successfully!",
-      data: canceledItemOrder,
+      data: "", // Return empty string
     });
   } catch (error) {
     console.error("Error updating canceled item order:", error);
@@ -212,7 +211,7 @@ const deleteCanceledItemOrder = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Deleted canceled item order successfully!",
-      data: canceledItemOrder,
+      data: "", // Return empty string
     });
   } catch (error) {
     console.error("Error deleting canceled item order:", error);
