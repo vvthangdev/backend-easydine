@@ -704,6 +704,7 @@ const getOrderInfo = async (req, res) => {
         time: order.time,
         type: order.type,
         status: order.status,
+        number_people: order.number_people,
         voucher_code: order.voucher_id ? order.voucher_id.code : null,
         total_amount: order.total_amount,
         discount_amount: order.discount_amount,
@@ -1347,18 +1348,17 @@ function sortObject(obj) {
 }
 
 const createPayment = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const { order_id, bank_code, language, txtexpire } = req.body;
-    console.log(`vvt check: ${req.user._id}`);
-    // if (orderData.status === "confirmed") {
-    //       newOrderData.staff_id = req.user._id;
-    //     }
+
     // Kiểm tra đầu vào
     if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Valid order_id is required!",
-        data: null,
+        message: "Yêu cầu phải có order_id hợp lệ!",
+        data: ""
       });
     }
 
@@ -1366,109 +1366,62 @@ const createPayment = async (req, res) => {
     const vnp_TmnCode = process.env.VNPAY_TMN_CODE;
     const vnp_HashSecret = process.env.VNPAY_HASH_SECRET;
     if (!vnp_TmnCode || !vnp_HashSecret) {
-      throw new Error("VNPAY configuration is missing");
+      throw new Error("Cấu hình VNPAY bị thiếu!");
     }
 
     // Kiểm tra đơn hàng
-    const order = await mongoose.model("OrderDetail").findById(order_id);
+    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
     if (!order) {
       return res.status(404).json({
         status: "ERROR",
-        message: "Order not found!",
-        data: null,
+        message: "Không tìm thấy đơn hàng!",
+        data: ""
       });
     }
     if (order.status !== "confirmed") {
       return res.status(400).json({
         status: "ERROR",
-        message: "Only confirmed orders can proceed to payment!",
-        data: null,
+        message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
+        data: ""
       });
     }
     if (order.payment_status === "success") {
       return res.status(400).json({
         status: "ERROR",
-        message: "Order has already been paid!",
-        data: null,
+        message: "Đơn hàng đã được thanh toán!",
+        data: ""
       });
     }
 
-    // Tính total_amount từ ItemOrder (giả sử có hàm này)
-    const total_amount = await calculateOrderTotal(order_id);
-    if (total_amount <= 0) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Order has no valid items or total amount is zero!",
-        data: null,
-      });
-    }
+    // Cập nhật số tiền đơn hàng bằng updateOrderAmounts
+    await orderService.updateOrderAmounts(order_id, session);
 
-    let discount_amount = 0;
-    let final_amount = total_amount;
-
-    // Xử lý voucher
-    if (order.voucher_id) {
-      const voucher = await mongoose
-        .model("Voucher")
-        .findById(order.voucher_id);
-      if (!voucher) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "Voucher not found!",
-          data: null,
-        });
-      }
-      if (voucher.discountType === "percentage") {
-        discount_amount = (voucher.discount / 100) * total_amount;
-      } else {
-        discount_amount = voucher.discount;
-      }
-      final_amount = total_amount - discount_amount;
-      if (final_amount < 0) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "Final amount cannot be negative!",
-          data: null,
-        });
-      }
-    }
-
-    // Cập nhật OrderDetail
-    await mongoose.model("OrderDetail").findByIdAndUpdate(order_id, {
-      cashier_id: req.user._id,
-      total_amount,
-      discount_amount,
-      final_amount,
-      payment_method: "vnpay",
-    });
+    // Cập nhật thông tin đơn hàng
+    await mongoose.model("OrderDetail").findByIdAndUpdate(
+      order_id,
+      {
+        cashier_id: req.user._id,
+        payment_method: "vnpay",
+        transaction_id: order_id,
+        payment_initiated_at: new Date(),
+      },
+      { session }
+    );
 
     // Cấu hình VNPay
     process.env.TZ = "Asia/Ho_Chi_Minh";
-    const vnp_Url =
-      process.env.VNPAY_URL ||
-      "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-    const vnp_ReturnUrl =
-      process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
+    const vnp_Url = process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+    const vnp_ReturnUrl = process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
     const vnp_CreateDate = moment(new Date()).format("YYYYMMDDHHmmss");
     const vnp_TxnRef = order_id;
-    const vnp_Amount = final_amount * 100; // VNPay yêu cầu nhân 100
+    const orderData = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    const vnp_Amount = orderData.final_amount * 100; // VNPay yêu cầu nhân 100
     const vnp_IpAddr = req.headers["x-forwarded-for"] || req.ip || "127.0.0.1";
     const vnp_Locale = language || "vn";
     const vnp_CurrCode = "VND";
-    const vnp_OrderInfo = `Thanh toan don hang ${order_id}`.replace(
-      /[^a-zA-Z0-9 ]/g,
-      ""
-    );
+    const vnp_OrderInfo = `Thanh toan don hang ${order_id}`.replace(/[^a-zA-Z0-9 ]/g, "");
     const vnp_OrderType = "other";
-    const vnp_ExpireDate =
-      txtexpire ||
-      moment(new Date()).add(30, "minutes").format("YYYYMMDDHHmmss"); // Tăng lên 30 phút
-
-    // Lưu thông tin giao dịch
-    await mongoose.model("OrderDetail").findByIdAndUpdate(order_id, {
-      transaction_id: vnp_TxnRef,
-      payment_initiated_at: new Date(),
-    });
+    const vnp_ExpireDate = txtexpire || moment(new Date()).add(30, "minutes").format("YYYYMMDDHHmmss");
 
     // Tạo params
     let vnp_Params = {
@@ -1495,29 +1448,150 @@ const createPayment = async (req, res) => {
     vnp_Params = sortObject(vnp_Params);
     const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", vnp_HashSecret);
-    const vnp_SecureHash = hmac
-      .update(Buffer.from(signData, "utf-8"))
-      .digest("hex");
+    const vnp_SecureHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
     vnp_Params.vnp_SecureHash = vnp_SecureHash;
 
     // Tạo URL
     const vnpUrl = `${vnp_Url}?${qs.stringify(vnp_Params, { encode: false })}`;
 
-    console.log(
-      `Creating payment for order ${order_id}: signData=${signData}, vnp_SecureHash=${vnp_SecureHash}`
-    );
+    await session.commitTransaction();
     return res.status(200).json({
       status: "SUCCESS",
-      message: "Payment URL created successfully!",
-      data: { vnpUrl },
+      message: "Tạo URL thanh toán thành công!",
+      data: vnpUrl
     });
   } catch (error) {
-    console.error("Error in createPayment:", error);
+    await session.abortTransaction();
+    console.error("Lỗi trong createPayment:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "An error occurred while creating payment!",
-      data: null,
+      message: error.message || "Đã xảy ra lỗi khi tạo thanh toán!",
+      data: ""
     });
+  } finally {
+    session.endSession();
+  }
+};
+
+const handlePaymentIPN = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const vnp_Params = req.query;
+    const vnp_SecureHash = vnp_Params.vnp_SecureHash;
+    const order_id = vnp_Params.vnp_TxnRef;
+    const vnp_Amount = parseInt(vnp_Params.vnp_Amount) / 100;
+    const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
+    const vnp_TransactionStatus = vnp_Params.vnp_TransactionStatus;
+    const vnp_TransactionNo = vnp_Params.vnp_TransactionNo;
+
+    delete vnp_Params.vnp_SecureHash;
+    delete vnp_Params.vnp_SecureHashType;
+
+    // Sắp xếp và tạo chữ ký
+    const signData = qs.stringify(sortObject(vnp_Params), { encode: false });
+    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
+    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+
+    // Kiểm tra chữ ký
+    if (calculatedHash !== vnp_SecureHash) {
+      await session.abortTransaction();
+      return res.status(200).json({ status: "ERROR", message: "Sai chữ ký!", data: "" });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(200).json({ status: "ERROR", message: "Không tìm thấy đơn hàng!", data: "" });
+    }
+
+    // Kiểm tra số tiền
+    if (order.final_amount !== vnp_Amount) {
+      await session.abortTransaction();
+      return res.status(200).json({ status: "ERROR", message: "Số tiền không hợp lệ!", data: "" });
+    }
+
+    // Kiểm tra trạng thái
+    if (order.payment_status === "success" || order.status === "completed") {
+      await session.abortTransaction();
+      return res.status(200).json({ status: "ERROR", message: "Đơn hàng đã được xử lý!", data: "" });
+    }
+
+    // Cập nhật trạng thái
+    if (vnp_ResponseCode === "00" && vnp_TransactionStatus === "00") {
+      await mongoose.model("OrderDetail").findByIdAndUpdate(
+        order_id,
+        {
+          status: "completed",
+          payment_status: "success",
+          vnp_transaction_no: vnp_TransactionNo,
+        },
+        { session }
+      );
+
+      // Cập nhật end_time trong ReservationTable
+      const reservation = await ReservedTable.findOne({ reservation_id: order_id }).session(session);
+      if (reservation) {
+        const currentTime = new Date();
+        const endTime = new Date(currentTime.getTime() - 60 * 1000); // Trừ 1 phút
+        await ReservedTable.findOneAndUpdate(
+          { reservation_id: order_id },
+          { end_time: endTime },
+          { session }
+        );
+      }
+
+      // Cập nhật voucher nếu có
+      if (order.voucher_id) {
+        await mongoose.model("Voucher").findByIdAndUpdate(
+          order.voucher_id,
+          { $inc: { usedCount: 1 } },
+          { session }
+        );
+      }
+
+      // Gửi thông báo Socket.IO
+      const io = socket.getIO();
+      io.to("adminRoom").emit("orderPaid", {
+        orderId: order_id,
+        payment_method: "vnpay",
+        status: "completed",
+        message: `Đơn hàng ${order_id} đã được thanh toán bằng VNPay`,
+      });
+
+      // Gửi email xác nhận thanh toán (không chặn luồng chính)
+      setImmediate(async () => {
+        try {
+          const user = await getUserByUserId(order.customer_id);
+          await emailService.sendOrderPaymentConfirmationEmail(
+            user.email,
+            user.name,
+            order
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email:", emailError.message);
+        }
+      });
+    } else {
+      await mongoose.model("OrderDetail").findByIdAndUpdate(
+        order_id,
+        {
+          payment_status: "failed",
+          vnp_transaction_no: vnp_TransactionNo,
+        },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    return res.status(200).json({ status: "SUCCESS", message: "Xử lý IPN thành công!", data: "" });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error(`Lỗi trong handlePaymentIPN cho đơn hàng ${req.query.vnp_TxnRef}: ${error.message}`);
+    return res.status(200).json({ status: "ERROR", message: "Lỗi không xác định!", data: "" });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -1532,13 +1606,7 @@ const handlePaymentReturn = async (req, res) => {
     vnp_Params = sortObject(vnp_Params);
     const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac
-      .update(Buffer.from(signData, "utf-8"))
-      .digest("hex");
-
-    console.log(`Return signData: ${signData}`);
-    console.log(`Return vnp_SecureHash: ${vnp_SecureHash}`);
-    console.log(`Return calculatedHash: ${calculatedHash}`);
+    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
 
     const order_id = vnp_Params.vnp_TxnRef;
     const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
@@ -1547,20 +1615,14 @@ const handlePaymentReturn = async (req, res) => {
     const order = await mongoose.model("OrderDetail").findById(order_id);
     if (!order) {
       return res.redirect(
-        `${
-          process.env.FRONTEND_URL
-        }/payment-failed?message=${encodeURIComponent("Order not found")}`
+        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent("Không tìm thấy đơn hàng!")}`
       );
     }
 
     // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
       return res.redirect(
-        `${
-          process.env.FRONTEND_URL
-        }/payment-failed?message=${encodeURIComponent(
-          "Sai chữ ký (Checksum failed)"
-        )}`
+        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent("Sai chữ ký!")}`
       );
     }
 
@@ -1569,192 +1631,34 @@ const handlePaymentReturn = async (req, res) => {
       "00": "Giao dịch thành công",
       "07": "Giao dịch bị nghi ngờ gian lận",
       "09": "Thẻ/Tài khoản chưa đăng ký Internet Banking",
-      10: "Xác thực thẻ/tài khoản không đúng quá 3 lần",
-      11: "Hết hạn chờ thanh toán",
-      12: "Thẻ/Tài khoản bị khóa",
-      13: "Sai OTP",
-      24: "Khách hàng hủy giao dịch",
-      51: "Tài khoản không đủ số dư",
-      65: "Vượt hạn mức giao dịch trong ngày",
-      75: "Ngân hàng đang bảo trì",
-      79: "Sai mật khẩu thanh toán quá số lần",
-      97: "Sai chữ ký",
-      99: "Lỗi không xác định",
+      "10": "Xác thực thẻ/tài khoản không đúng quá 3 lần",
+      "11": "Hết hạn chờ thanh toán",
+      "12": "Thẻ/Tài khoản bị khóa",
+      "13": "Sai OTP",
+      "24": "Khách hàng hủy giao dịch",
+      "51": "Tài khoản không đủ số dư",
+      "65": "Vượt hạn mức giao dịch trong ngày",
+      "75": "Ngân hàng đang bảo trì",
+      "79": "Sai mật khẩu thanh toán quá số lần",
+      "97": "Sai chữ ký",
+      "99": "Lỗi không xác định",
     };
 
-    const message =
-      errorMessages[vnp_ResponseCode] ||
-      `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
+    const message = errorMessages[vnp_ResponseCode] || `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
     if (vnp_ResponseCode === "00") {
       return res.redirect(
-        `${
-          process.env.FRONTEND_URL
-        }/payment-success?order_id=${order_id}&message=${encodeURIComponent(
-          message
-        )}`
+        `${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}&message=${encodeURIComponent(message)}`
       );
     } else {
       return res.redirect(
-        `${
-          process.env.FRONTEND_URL
-        }/payment-failed?message=${encodeURIComponent(message)}`
+        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(message)}`
       );
     }
   } catch (error) {
-    console.error(
-      `Error in handlePaymentReturn for order ${req.query.vnp_TxnRef}:`,
-      error
-    );
+    console.error(`Lỗi trong handlePaymentReturn cho đơn hàng ${req.query.vnp_TxnRef}: ${error.message}`);
     return res.redirect(
-      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(
-        "Error processing payment"
-      )}`
+      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent("Lỗi xử lý thanh toán!")}`
     );
-  }
-};
-
-const handlePaymentIPN = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    console.log(
-      "Starting IPN processing for request:",
-      JSON.stringify(req.query)
-    );
-    let vnp_Params = req.query;
-    const vnp_SecureHash = vnp_Params.vnp_SecureHash;
-    const order_id = vnp_Params.vnp_TxnRef;
-    const vnp_Amount = parseInt(vnp_Params.vnp_Amount) / 100;
-    const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
-    const vnp_TransactionStatus = vnp_Params.vnp_TransactionStatus;
-    const vnp_TransactionNo = vnp_Params.vnp_TransactionNo;
-
-    console.log(
-      `Extracted parameters: order_id=${order_id}, amount=${vnp_Amount}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}, transactionNo=${vnp_TransactionNo}`
-    );
-
-    delete vnp_Params.vnp_SecureHash;
-    delete vnp_Params.vnp_SecureHashType;
-
-    // Sắp xếp và tạo chữ ký
-    vnp_Params = sortObject(vnp_Params);
-    const signData = qs.stringify(vnp_Params, { encode: false });
-    const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac
-      .update(Buffer.from(signData, "utf-8"))
-      .digest("hex");
-
-    console.log(`IPN signData: ${signData}`);
-    console.log(`IPN vnp_SecureHash: ${vnp_SecureHash}`);
-    console.log(`IPN calculatedHash: ${calculatedHash}`);
-
-    // Kiểm tra chữ ký
-    if (calculatedHash !== vnp_SecureHash) {
-      console.error(
-        `Invalid signature for IPN, order ${order_id}. Expected: ${calculatedHash}, Received: ${vnp_SecureHash}`
-      );
-      await session.abortTransaction();
-      return res
-        .status(200)
-        .json({ RspCode: "97", Message: "Checksum failed" });
-    }
-    console.log(`Signature verification passed for order ${order_id}`);
-
-    // Kiểm tra đơn hàng
-    const order = await mongoose
-      .model("OrderDetail")
-      .findById(order_id)
-      .session(session);
-    if (!order) {
-      console.error(`Order not found for IPN, order ${order_id}`);
-      await session.abortTransaction();
-      return res
-        .status(200)
-        .json({ RspCode: "01", Message: "Order not found" });
-    }
-    console.log(`Order found: ${JSON.stringify(order)}`);
-
-    // Kiểm tra số tiền
-    if (order.final_amount !== vnp_Amount) {
-      console.error(
-        `Invalid amount for IPN, order ${order_id}: expected ${order.final_amount}, got ${vnp_Amount}`
-      );
-      await session.abortTransaction();
-      return res.status(200).json({ RspCode: "04", Message: "Invalid amount" });
-    }
-    console.log(`Amount verification passed for order ${order_id}`);
-
-    // Kiểm tra trạng thái
-    if (order.payment_status === "success" || order.status === "completed") {
-      console.log(
-        `Order already processed for IPN, order ${order_id}, payment_status=${order.payment_status}, status=${order.status}`
-      );
-      await session.abortTransaction();
-      return res
-        .status(200)
-        .json({ RspCode: "02", Message: "Order already confirmed" });
-    }
-    console.log(`Order status check passed for order ${order_id}`);
-
-    // Cập nhật trạng thái
-    if (vnp_ResponseCode === "00" && vnp_TransactionStatus === "00") {
-      console.log(`Processing successful payment for order ${order_id}`);
-      await mongoose.model("OrderDetail").findByIdAndUpdate(
-        order_id,
-        {
-          status: "completed",
-          payment_status: "success",
-          vnp_transaction_no: vnp_TransactionNo,
-        },
-        { session }
-      );
-
-      if (order.voucher_id) {
-        console.log(
-          `Updating voucher usage for voucher_id ${order.voucher_id}`
-        );
-        await mongoose
-          .model("Voucher")
-          .findByIdAndUpdate(
-            order.voucher_id,
-            { $inc: { usedCount: 1 } },
-            { session }
-          );
-      }
-    } else {
-      console.log(
-        `Processing failed payment for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionStatus=${vnp_TransactionStatus}`
-      );
-      await mongoose.model("OrderDetail").findByIdAndUpdate(
-        order_id,
-        {
-          payment_status: "failed",
-          vnp_transaction_no: vnp_TransactionNo,
-        },
-        { session }
-      );
-    }
-
-    await session.commitTransaction();
-    console.log(
-      `IPN processed successfully for order ${order_id}, responseCode=${vnp_ResponseCode}, transactionNo=${vnp_TransactionNo}`
-    );
-    return res.status(200).json({ RspCode: "00", Message: "Success" });
-  } catch (error) {
-    console.error(
-      `Error in handlePaymentIPN for order ${req.query.vnp_TxnRef}: ${error.message}`,
-      {
-        stack: error.stack,
-        params: req.query,
-      }
-    );
-    await session.abortTransaction();
-    return res.status(200).json({ RspCode: "99", Message: "Unknown error" });
-  } finally {
-    console.log(
-      `Ending session for IPN processing, order ${req.query.vnp_TxnRef}`
-    );
-    session.endSession();
   }
 };
 
@@ -2314,95 +2218,69 @@ const payOrder = async (req, res) => {
       return res.status(400).json({
         status: "ERROR",
         message: "Yêu cầu phải có order_id hợp lệ!",
-        data: null,
+        data: ""
       });
     }
     if (!payment_method || !["cash", "bank_transfer"].includes(payment_method)) {
       return res.status(400).json({
         status: "ERROR",
         message: "Phương thức thanh toán phải là 'cash' hoặc 'bank_transfer'!",
-        data: null,
+        data: ""
       });
     }
 
     // Kiểm tra đơn hàng
-    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    const order = await OrderDetail.findById(order_id).session(session);
     if (!order) {
       return res.status(404).json({
         status: "ERROR",
         message: "Không tìm thấy đơn hàng!",
-        data: null,
+        data: ""
       });
     }
     if (order.status !== "confirmed") {
       return res.status(400).json({
         status: "ERROR",
         message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
-        data: null,
+        data: ""
       });
     }
     if (order.payment_status === "success") {
       return res.status(400).json({
         status: "ERROR",
         message: "Đơn hàng đã được thanh toán!",
-        data: null,
+        data: ""
       });
     }
 
-    // Tính tổng số tiền
-    const total_amount = await calculateOrderTotal(order_id);
-    if (total_amount <= 0) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Đơn hàng không có mặt hàng hợp lệ hoặc tổng số tiền bằng 0!",
-        data: null,
-      });
-    }
-
-    let discount_amount = 0;
-    let final_amount = total_amount;
-
-    // Xử lý voucher nếu có
-    if (order.voucher_id) {
-      const voucher = await mongoose.model("Voucher").findById(order.voucher_id).session(session);
-      if (!voucher) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "Không tìm thấy voucher!",
-          data: null,
-        });
-      }
-      if (voucher.discountType === "percentage") {
-        discount_amount = (voucher.discount / 100) * total_amount;
-      } else {
-        discount_amount = voucher.discount;
-      }
-      final_amount = total_amount - discount_amount;
-      if (final_amount < 0) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "Số tiền cuối cùng không thể âm!",
-          data: null,
-        });
-      }
-    }
+    // Cập nhật số tiền đơn hàng bằng hàm updateOrderAmounts
+    await orderService.updateOrderAmounts(order_id, session);
 
     // Cập nhật thông tin đơn hàng
-    const updatedOrder = await mongoose.model("OrderDetail").findByIdAndUpdate(
+    await OrderDetail.findByIdAndUpdate(
       order_id,
       {
         cashier_id: req.user._id,
-        total_amount,
-        discount_amount,
-        final_amount,
         payment_method,
         status: "completed",
         payment_status: "success",
         payment_initiated_at: new Date(),
         transaction_id: `TX-${order_id}-${Date.now()}`,
       },
-      { new: true, session }
+      { session }
     );
+
+    // Cập nhật end_time trong ReservationTable
+    const reservation = await ReservedTable.findOne({ reservation_id: order_id }).session(session);
+    if (reservation) {
+      const currentTime = new Date();
+      const endTime = new Date(currentTime.getTime() - 60 * 1000);
+      await ReservedTable.findOneAndUpdate(
+        { reservation_id: order_id },
+        { end_time: endTime },
+        { session }
+      );
+    }
 
     // Hoàn tất giao dịch
     await session.commitTransaction();
@@ -2410,38 +2288,23 @@ const payOrder = async (req, res) => {
     // Gửi thông báo Socket.IO
     const io = socket.getIO();
     io.to("adminRoom").emit("orderPaid", {
-      orderId: updatedOrder._id.toString(),
+      orderId: order_id,
       payment_method,
-      final_amount,
-      status: updatedOrder.status,
-      message: `Đơn hàng ${updatedOrder._id} đã được thanh toán bằng ${payment_method}`,
-    });
-
-    // Gửi email xác nhận thanh toán (không chặn luồng chính)
-    setImmediate(async () => {
-      try {
-        const user = await getUserByUserId(updatedOrder.customer_id);
-        await emailService.sendOrderPaymentConfirmationEmail(
-          user.email,
-          user.name,
-          updatedOrder
-        );
-      } catch (emailError) {
-        console.error("Lỗi gửi email:", emailError.message);
-      }
+      status: "completed",
+      message: `Đơn hàng ${order_id} đã được thanh toán bằng ${payment_method}`,
     });
 
     return res.status(200).json({
       status: "SUCCESS",
-      message: "Thanh toán đơn hàng thành công!",
-      data: updatedOrder,
+      message: "Thanh toán đơn hàng và cập nhật trạng thái bàn thành công!",
+      data: ""
     });
   } catch (error) {
     await session.abortTransaction();
     return res.status(500).json({
       status: "ERROR",
       message: error.message || "Đã xảy ra lỗi khi xử lý thanh toán!",
-      data: null,
+      data: ""
     });
   } finally {
     session.endSession();
