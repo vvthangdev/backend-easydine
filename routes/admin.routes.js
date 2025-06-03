@@ -4,6 +4,13 @@ const authMiddleware = require("../middlewares/auth.middleware.js");
 
 const router = express.Router();
 
+router.post(
+  "/create-user",
+  authMiddleware.authenticateToken,
+  authMiddleware.adminRoleAuth,
+  adminController.createUserByAdmin
+);
+
 // Xóa người dùng (nhận id hoặc username trong body)
 router.delete(
   "/delete",

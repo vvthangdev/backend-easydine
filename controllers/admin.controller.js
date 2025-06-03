@@ -6,6 +6,101 @@ const { getIO } = require("../socket/socket.js")
 const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 
+const createUserByAdmin = async (req, res) => {
+  try {
+    const {
+      username,
+      email,
+      password,
+      name,
+      phone,
+      address,
+      role,
+      avatar
+    } = req.body;
+
+    // Kiểm tra các trường bắt buộc
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Username, email và password là bắt buộc!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra định dạng email
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Email không hợp lệ!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra độ dài mật khẩu
+    if (password.length < 8) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Mật khẩu phải có ít nhất 8 ký tự!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra vai trò hợp lệ
+    if (role && !["ADMIN", "STAFF", "CUSTOMER"].includes(role)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Vai trò không hợp lệ! Phải là ADMIN, STAFF hoặc CUSTOMER.",
+        data: null,
+      });
+    }
+
+    // Kiểm tra sự tồn tại của username hoặc email
+    const existingUser = await User.findOne({
+      $or: [{ username }, { email }],
+    });
+    if (existingUser) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Username hoặc email đã tồn tại!",
+        data: null,
+      });
+    }
+
+    // Mã hóa mật khẩu
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Tạo dữ liệu người dùng mới
+    const userData = {
+      username,
+      email,
+      password: hashedPassword,
+      name: name || "",
+      phone: phone || "",
+      address: address || "",
+      role: role || "CUSTOMER",
+      avatar: avatar || "",
+      isActive: true,
+    };
+
+    await userService.createUser(userData);
+
+    return res.status(201).json({
+      status: "SUCCESS",
+      message: "Tạo người dùng thành công!",
+      data: "",
+    });
+  } catch (error) {
+    console.error("Lỗi khi tạo người dùng bởi admin:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Đã xảy ra lỗi khi tạo người dùng!",
+      data: null,
+    });
+  }
+};
+
 const deleteUserByAdmin = async (req, res) => {
   try {
     const { id, username } = req.body;
@@ -353,6 +448,7 @@ const handlePaymentWebhook = async (req, res) => {
   }
 };
 module.exports = {
+  createUserByAdmin,
   deleteUserByAdmin,
   updateUserByAdmin,
   deactivateUser,
