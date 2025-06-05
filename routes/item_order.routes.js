@@ -8,7 +8,7 @@ const router = express.Router();
 router.get("/", itemOrdController.getAllItemOrds);
 
 // router.use(authMiddleware.authenticateToken);
-// router.use(authMiddleware.adminRoleAuth);
+// router.use(authMiddleware.requireStaff);
 
 router.post("/create-itemOrd", itemOrdController.createItemOrd);
 

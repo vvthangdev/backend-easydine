@@ -21,7 +21,7 @@ router.post(
 router.get(
   "/",
   authMiddleware.authenticateToken,
-  authMiddleware.requireAdmin, // Thay vì adminRoleAuth
+  authMiddleware.requireAdmin, // Thay vì requireStaff
   canceledItemOrderController.getAllCanceledItemOrders
 );
 
@@ -37,7 +37,7 @@ router.get(
 router.patch(
   "/:id",
   authMiddleware.authenticateToken,
-  authMiddleware.requireAdmin, // Thay vì adminRoleAuth
+  authMiddleware.requireAdmin, // Thay vì requireStaff
   canceledItemOrderController.updateCanceledItemOrder
 );
 
@@ -45,7 +45,7 @@ router.patch(
 router.delete(
   "/:id",
   authMiddleware.authenticateToken,
-  authMiddleware.requireAdmin, // Thay vì adminRoleAuth
+  authMiddleware.requireAdmin, // Thay vì requireStaff
   canceledItemOrderController.deleteCanceledItemOrder
 );
 

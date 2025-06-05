@@ -47,7 +47,7 @@ router.patch(
 router.get(
   "/customer",
   authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
+  authMiddleware.requireStaff,
   adminController.adminGetUserInfo
 );
 

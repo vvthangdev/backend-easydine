@@ -5,30 +5,71 @@ const authMiddleware = require("../middlewares/auth.middleware");
 const router = express.Router();
 
 // Lấy tất cả voucher (mọi vai trò)
-router.get("/", authMiddleware.authenticateToken, voucherController.getAllVouchers);
+router.get(
+  "/",
+  authMiddleware.authenticateToken,
+  voucherController.getAllVouchers
+);
 
 // Tạo voucher mới (chỉ ADMIN)
-router.post("/", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.createVoucher);
+router.post(
+  "/",
+  authMiddleware.authenticateToken,
+  authMiddleware.requireStaff,
+  voucherController.createVoucher
+);
 
 // Lấy voucher theo code (mọi vai trò)
-router.get("/code/:code", authMiddleware.authenticateToken, voucherController.getVoucher);
+router.get(
+  "/code/:code",
+  authMiddleware.authenticateToken,
+  voucherController.getVoucher
+);
 
 // Thêm người dùng vào voucher (chỉ ADMIN)
-router.post("/add/users", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.addUsersToVoucher);
+router.post(
+  "/add/users",
+  authMiddleware.authenticateToken,
+  authMiddleware.requireStaff,
+  voucherController.addUsersToVoucher
+);
 
 // Xóa người dùng khỏi voucher (chỉ ADMIN)
-router.delete("/delete/users", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.removeUsersFromVoucher);
+router.delete(
+  "/delete/users",
+  authMiddleware.authenticateToken,
+  authMiddleware.requireStaff,
+  voucherController.removeUsersFromVoucher
+);
 
 // Áp dụng voucher cho đơn hàng (chỉ STAFF hoặc CUSTOMER)
-router.post("/apply", authMiddleware.authenticateToken, voucherController.applyVoucherToOrder);
+router.post(
+  "/apply",
+  authMiddleware.authenticateToken,
+  voucherController.applyVoucherToOrder
+);
 
 // Lấy voucher theo ID (mọi vai trò)
-router.get("/:id", authMiddleware.authenticateToken, voucherController.getVoucherById);
+router.get(
+  "/:id",
+  authMiddleware.authenticateToken,
+  voucherController.getVoucherById
+);
 
 // Cập nhật voucher (chỉ ADMIN)
-router.patch("/:id", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.updateVoucher);
+router.patch(
+  "/:id",
+  authMiddleware.authenticateToken,
+  authMiddleware.requireStaff,
+  voucherController.updateVoucher
+);
 
 // Xóa voucher (chỉ ADMIN)
-router.delete("/:id", authMiddleware.authenticateToken, authMiddleware.adminRoleAuth, voucherController.deleteVoucher);
+router.delete(
+  "/:id",
+  authMiddleware.authenticateToken,
+  authMiddleware.requireStaff,
+  voucherController.deleteVoucher
+);
 
 module.exports = router;

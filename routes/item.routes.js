@@ -16,7 +16,7 @@ router.delete("/delete-category", itemController.deleteCategory);
 
 // Bảo vệ các route dưới đây (tùy chọn)
 // router.use(authMiddware.authenticateToken);
-// router.use(authMiddware.adminRoleAuth);
+// router.use(authMiddware.requireStaff);
 
 router.post("/create-item", itemController.createItem); // Đã có sẵn, sẽ cập nhật
 router.patch("/update-item", itemController.updateItem); // Đã có sẵn, sẽ cập nhật

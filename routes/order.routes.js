@@ -4,7 +4,9 @@ const authMiddleware = require("../middlewares/auth.middleware.js");
 
 const router = express.Router();
 
-router.get("/", authMiddleware.authenticateToken, orderController.getAllOrders);
+// router.use()
+
+router.get("/", authMiddleware.authenticateToken, authMiddleware.requireStaff, orderController.getAllOrders);
 
 router.post(
   "/create-order",
@@ -12,10 +14,8 @@ router.post(
   orderController.createOrder
 );
 
-router.post(
-  "/create-table-order",
-  orderController.createTableOrder
-);
+router.post("/create-table-order",  orderController.createTableOrder);
+
 router.get(
   "/all-order-info",
   authMiddleware.authenticateToken,
@@ -34,7 +34,7 @@ router.get(
 router.delete(
   "/delete-order/:id",
   authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
+  authMiddleware.requireStaff,
   orderController.deleteOrder
 );
 router.get(
@@ -46,20 +46,20 @@ router.get(
 router.get(
   "/search-by-customer",
   authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
+  authMiddleware.requireStaff,
   orderController.searchOrdersByCustomerId
 );
 router.post(
   "/split-order",
   authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
+  authMiddleware.requireStaff,
   orderController.splitOrder
 );
 
 router.post(
   "/merge-order",
   authMiddleware.authenticateToken,
-  authMiddleware.adminRoleAuth,
+  authMiddleware.requireStaff,
   orderController.mergeOrder
 );
 router.post(
@@ -88,8 +88,8 @@ router.post(
   orderController.payOrder
 );
 
-router.get("/test01", orderController.testNewOrder)
+router.get("/test01", orderController.testNewOrder);
 
-router.get("/test02", orderController.testNewOrder2)
+router.get("/test02", orderController.testNewOrder2);
 
 module.exports = router;
