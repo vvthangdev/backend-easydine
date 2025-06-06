@@ -4,8 +4,7 @@ const User = require("../models/user.model");
 async function getAllUsers(projection = {}) {
   try {
     const users = await User.find({}, projection);
-    console.log("vvt check 01: users =", JSON.stringify(users, null, 2));
-    console.log("vvt check 01: projection =", JSON.stringify({ refresh_token: 0, password: 0 }, null, 2));
+
     return users;
   } catch (error) {
     console.error("Error fetching all users:", error);
@@ -132,8 +131,6 @@ const updateUser = async (username, updatedData, projection = {}) => {
     if (!user) {
       throw new Error("User not found");
     }
-    console.log(`vvt check: ${user} and ${projection}`)
-    console.log("vvt check 01: projection =", JSON.stringify({ refresh_token: 0, password: 0 }, null, 2));
     return user;
   } catch (error) {
     console.error("Error updating user:", error);
