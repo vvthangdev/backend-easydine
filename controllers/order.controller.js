@@ -275,7 +275,6 @@ const createTableOrder = async (req, res) => {
     }));
     await orderService.createReservations(reservedTables, { session });
 
-    // Xử lý các mục hàng (items) nếu có
     if (items && Array.isArray(items) && items.length > 0) {
       const itemIds = items.map((item) => {
         if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
@@ -319,10 +318,8 @@ const createTableOrder = async (req, res) => {
       await orderService.createItemOrders(itemOrders, { session });
     }
 
-    // Cập nhật số tiền đơn hàng trong cùng giao dịch
     await orderService.updateOrderAmounts(newOrder._id, session);
 
-    // Chuyển newOrder thành đối tượng JavaScript và thêm danh sách bàn
     const orderResponse = newOrder.toObject();
     orderResponse.tables = tables;
     const tableInfosDetails = await TableInfo.find({ _id: { $in: tables } })
@@ -331,10 +328,8 @@ const createTableOrder = async (req, res) => {
       .session(session);
     orderResponse.tableDetails = tableInfosDetails;
 
-    // Hoàn tất giao dịch
     await session.commitTransaction();
 
-    // Chuẩn bị phản hồi
     const response = {
       status: "SUCCESS",
       message: "Tạo đơn hàng bàn thành công!",
@@ -367,107 +362,71 @@ const updateOrder = async (req, res) => {
     },
   });
   session.startTransaction();
+
   try {
-    const { id, start_time, end_time, tables, items, ...otherFields } =
-      req.body;
+    const { id, start_time, end_time, tables, items, ...otherFields } = req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Valid order ID is required!",
-        data: null,
-      });
+      return res.status(400).json({ status: "ERROR", message: "ID đơn hàng sai rồi!", data: null });
     }
 
     const order = await OrderDetail.findById(id).session(session);
     if (!order) {
-      return res.status(404).json({
-        status: "ERROR",
-        message: "Order not found!",
-        data: null,
-      });
+      return res.status(404).json({ status: "ERROR", message: "Đơn hàng không tìm thấy!", data: null });
     }
 
     const updateData = { ...otherFields };
     if (start_time) updateData.time = new Date(start_time);
 
     if (order.status === "pending" && otherFields.status === "confirmed") {
-      if (!req.user._id) {
-        throw new Error("Staff ID is required to confirm order!");
-      }
+      if (!req.user?._id) throw new Error("Confirm đơn cần ID nhân viên!");
       updateData.staff_id = req.user._id;
     }
 
-    if (
-      ["completed", "canceled"].includes(otherFields.status) &&
-      order.type === "reservation"
-    ) {
-      const currentTime = new Date();
+    if (["completed", "canceled"].includes(otherFields.status) && order.type === "reservation") {
       await ReservedTable.updateMany(
         { reservation_id: id },
-        { end_time: currentTime },
+        { end_time: new Date() },
         { session }
       );
     }
 
-    const updatedOrder = await orderService.updateOrder(id, updateData, {
-      session,
-    });
+    const updatedOrder = await orderService.updateOrder(id, updateData, { session });
     if (!updatedOrder) {
-      return res.status(404).json({
-        status: "ERROR",
-        message: "Order not found!",
-        data: null,
-      });
+      return res.status(404).json({ status: "ERROR", message: "Update thất bại, đơn không thấy!", data: null });
     }
 
-    if (order.type === "reservation" && tables !== undefined) {
+    if (order.type === "reservation" && tables) {
       if (tables.length > 0) {
-        if (!start_time || !end_time) {
-          return res.status(400).json({
-            status: "ERROR",
-            message:
-              "start_time and end_time are required when updating tables!",
-            data: null,
-          });
-        }
-
-        for (const tableId of tables) {
-          if (!mongoose.Types.ObjectId.isValid(tableId)) {
-            throw new Error("Invalid table_id!");
-          }
+        if (!start_time) {
+          return res.status(400).json({ status: "ERROR", message: "Thiếu start_time để đặt bàn!", data: null });
         }
 
         const startTime = new Date(start_time);
-        const endTime = new Date(end_time);
+        const defaultEndTime = new Date(startTime.getTime() + 4 * 60 * 60 * 1000);
+        const maxEndTime = new Date(startTime);
+        maxEndTime.setHours(23, 59, 0, 0);
 
-        const tableInfos = await TableInfo.find({
-          _id: { $in: tables },
-        }).session(session);
-        if (tableInfos.length !== tables.length) {
-          throw new Error("One or more table_ids not found!");
-        }
+        let commonEndTime = end_time
+          ? new Date(end_time) < startTime
+            ? maxEndTime
+            : new Date(Math.min(new Date(end_time).getTime(), maxEndTime.getTime()))
+          : new Date(Math.min(defaultEndTime.getTime(), maxEndTime.getTime()));
 
-        const unavailableTables = await orderService.checkUnavailableTables(
-          startTime,
-          endTime,
-          tables,
-          id
-        );
-        if (unavailableTables.length > 0) {
-          return res.status(400).json({
-            status: "ERROR",
-            message: "Some selected tables are not available!",
-            data: { unavailable: unavailableTables },
-          });
-        }
+        const tableIds = tables.map((table) => table.tableId || table);
+        const tableInfos = await TableInfo.find({ _id: { $in: tableIds } }).session(session);
+        if (tableInfos.length !== tableIds.length) throw new Error("Có bàn không tồn tại!");
 
         await ReservedTable.deleteMany({ reservation_id: id }).session(session);
-        const newReservations = tables.map((tableId) => ({
+        const newReservations = tables.map((table) => ({
           reservation_id: id,
-          table_id: new mongoose.Types.ObjectId(tableId),
+          table_id: new mongoose.Types.ObjectId(table.tableId || table),
           start_time: startTime,
-          end_time: endTime,
+          end_time: table.end_time
+            ? new Date(table.end_time) < startTime
+              ? maxEndTime
+              : new Date(Math.min(new Date(table.end_time).getTime(), maxEndTime.getTime()))
+            : commonEndTime,
         }));
         await orderService.createReservations(newReservations, { session });
       } else {
@@ -475,40 +434,19 @@ const updateOrder = async (req, res) => {
       }
     }
 
-    if (items !== undefined) {
+    if (items) {
       await ItemOrder.deleteMany({ order_id: id }).session(session);
-
       if (items.length > 0) {
-        const itemIds = items.map(
-          (item) => new mongoose.Types.ObjectId(item.id)
-        );
-        const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
-          session
-        );
-        const itemMap = new Map(
-          foundItems.map((item) => [item._id.toString(), item])
-        );
+        const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
+        const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
+        const itemMap = new Map(foundItems.map((item) => [item._id.toString(), item]));
 
         for (const item of items) {
-          if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
-            throw new Error("Invalid item ID!");
-          }
-          if (!item.quantity || item.quantity < 1) {
-            throw new Error("Quantity must be a positive number!");
-          }
+          if (!item.quantity || item.quantity < 1) throw new Error("Số lượng món phải lớn hơn 0!");
           const itemExists = itemMap.get(item.id);
-          if (!itemExists) {
-            throw new Error(`Item with ID ${item.id} not found!`);
-          }
-          if (item.size) {
-            const validSize = itemExists.sizes.find(
-              (s) => s.name === item.size
-            );
-            if (!validSize) {
-              throw new Error(
-                `Invalid size ${item.size} for item ${itemExists.name}!`
-              );
-            }
+          if (!itemExists) throw new Error(`Món ${item.id} không có trong menu!`);
+          if (item.size && !itemExists.sizes.find((s) => s.name === item.size)) {
+            throw new Error(`Size ${item.size} không hợp lệ cho món ${itemExists.name}!`);
           }
         }
 
@@ -525,42 +463,16 @@ const updateOrder = async (req, res) => {
 
     await session.commitTransaction();
 
-    const response = {
+    return res.status(200).json({
       status: "SUCCESS",
-      message: "Order updated successfully!",
+      message: "Cập nhật đơn ngon lành!",
       data: "",
-    };
-
-    if (otherFields.status) {
-      setImmediate(async () => {
-        try {
-          const { io, adminSockets } = require("../app");
-          const notification = {
-            orderId: updatedOrder._id.toString(),
-            customerId: updatedOrder.customer_id.toString(),
-            type: updatedOrder.type,
-            status: updatedOrder.status,
-            staffId: updatedOrder.staff_id?.toString() || null,
-            time: updatedOrder.time.toISOString(),
-            createdAt: new Date().toISOString(),
-            message: `Order ${updatedOrder._id} updated to status ${updatedOrder.status}`,
-          };
-
-          adminSockets.forEach((socket) => {
-            socket.emit("orderStatusUpdate", notification);
-          });
-        } catch (error) {
-          console.error("Error sending notification:", error.message);
-        }
-      });
-    }
-
-    return res.status(200).json(response);
+    });
   } catch (error) {
     await session.abortTransaction();
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "An error occurred while updating the order!",
+      message: error.message || "Lỗi gì đó khi update đơn, thử lại nha!",
       data: null,
     });
   } finally {
