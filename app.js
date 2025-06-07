@@ -71,6 +71,7 @@ const itemOrdRouter = require("./routes/item_order.routes.js");
 const adminRouter = require("./routes/admin.routes.js");
 const voucherRouter = require("./routes/voucher.routes.js");
 const canceledItemOrderRouter = require("./routes/canceledItem.routes.js")
+const analyticsRouter = require("./routes/analytics.route.js")
 
 // Đăng ký routes
 app.use("/item", itemRouter);
@@ -81,6 +82,7 @@ app.use("/item-order", itemOrdRouter);
 app.use("/admin", adminRouter);
 app.use("/vouchers", voucherRouter);
 app.use("/canceled-item-orders", canceledItemOrderRouter)
+app.use("/analytics", analyticsRouter)
 
 require('./utils/scheduler.js');
 
