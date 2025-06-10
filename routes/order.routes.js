@@ -71,13 +71,11 @@ router.get("/payment-return", orderController.handlePaymentReturn);
 router.get("/payment-ipn", orderController.handlePaymentIPN);
 router.post(
   "/add-items-to-order",
-  authMiddleware.authenticateToken,
-  authMiddleware.authenticateToken,
+  // authMiddleware.authenticateToken,
   orderController.addItemsToOrder
 );
 router.post(
   "/cancel-items",
-  authMiddleware.authenticateToken,
   authMiddleware.authenticateToken,
   orderController.cancelItems
 );
