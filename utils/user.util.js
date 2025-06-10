@@ -6,7 +6,7 @@ const validateSignUpSignUp = (req, res, next) => {
 
   if (!name || !email || !phone || !username || !password) {
     return res.status(400).send("Empty input fields!");
-  } else if (!/^[a-zA-Z ]*$/.test(name.trim())) {
+  } else if (!/^[a-zA-ZÀ-ỹ ]*$/.test(name.trim())) {
     return res.status(400).send("Invalid name entered");
   } else if (!/^[\w\.\-]+@([\w\-]+\.)+[\w\-]{2,4}$/.test(email.trim())) {
     return res.status(400).send("Invalid email entered");
