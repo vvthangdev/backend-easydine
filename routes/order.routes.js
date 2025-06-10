@@ -39,7 +39,7 @@ router.delete(
 );
 router.get(
   "/order-info",
-  authMiddleware.authenticateToken,
+  // authMiddleware.authenticateToken,
   orderController.getOrderInfo
 );
 
