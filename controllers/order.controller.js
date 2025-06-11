@@ -354,6 +354,218 @@ const createTableOrder = async (req, res) => {
   }
 };
 
+const reserveTable = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { start_time, people_assigned, items, ...orderData } = req.body;
+
+    // Kiểm tra dữ liệu đầu vào
+    if (!start_time) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Yêu cầu phải có start_time!",
+        data: null,
+      });
+    }
+    if (!people_assigned || people_assigned < 1) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Số người (people_assigned) phải là số dương!",
+        data: null,
+      });
+    }
+
+    // Đặt type mặc định là reservation
+    const orderType = "reservation";
+    if (orderData.type && orderData.type !== orderType) {
+      throw new Error("Loại đơn hàng phải là reservation!");
+    }
+
+    // Tính endTime từ start_time và offset từ .env
+    const startTime = new Date(start_time);
+    const reservationDuration =
+      parseInt(process.env.RESERVATION_TABLE_DURATION_MINUTES) || 120;
+    const endTime = new Date(
+      startTime.getTime() + reservationDuration * 60 * 1000
+    );
+
+    // Tìm tất cả các bàn trống
+    const availableTables = await TableInfo.find({})
+      .sort({ capacity: -1 }) // Sắp xếp theo sức chứa giảm dần để ưu tiên bàn lớn
+      .session(session);
+
+    if (availableTables.length === 0) {
+      throw new Error("Không có bàn nào khả dụng!");
+    }
+
+    // Kiểm tra tính khả dụng của các bàn
+    const tableIds = availableTables.map((table) => table._id);
+    const unavailableTables = await orderService.checkUnavailableTables(
+      startTime,
+      endTime,
+      tableIds,
+      null,
+      { session }
+    );
+
+    // Lọc các bàn khả dụng
+    const availableTableList = availableTables.filter(
+      (table) => !unavailableTables.includes(table._id.toString())
+    );
+
+    if (availableTableList.length === 0) {
+      throw new Error("Không có bàn nào khả dụng trong khoảng thời gian yêu cầu!");
+    }
+
+    // Tìm tổ hợp bàn phù hợp với số người
+    let remainingPeople = people_assigned;
+    const selectedTables = [];
+    let totalCapacity = 0;
+
+    for (const table of availableTableList) {
+      if (remainingPeople > 0) {
+        selectedTables.push(table);
+        totalCapacity += table.capacity;
+        remainingPeople -= table.capacity;
+      } else {
+        break;
+      }
+    }
+
+    // Kiểm tra xem tổng sức chứa có đủ không
+    if (totalCapacity < people_assigned) {
+      throw new Error("Không đủ bàn để chứa số người yêu cầu!");
+    }
+
+    const selectedTableIds = selectedTables.map((table) => table._id);
+
+    // Tạo dữ liệu đơn hàng mới
+    const newOrderData = {
+      customer_id: req.user ? req.user._id : null,
+      time: startTime,
+      type: orderType,
+      number_people: people_assigned,
+      ...orderData,
+    };
+    if (orderData.status === "confirmed" && req.user?._id) {
+      newOrderData.staff_id = req.user._id;
+    }
+
+    // Tạo đơn hàng
+    const newOrder = await orderService.createOrder(newOrderData, { session });
+
+    // Tạo đặt bàn
+    const reservedTables = selectedTableIds.map((tableId) => ({
+      reservation_id: newOrder._id,
+      table_id: new mongoose.Types.ObjectId(tableId),
+      start_time: startTime,
+      end_time: endTime,
+      people_assigned,
+    }));
+    await orderService.createReservations(reservedTables, { session });
+
+    // Xử lý các món ăn (items) nếu có
+    if (items && Array.isArray(items) && items.length > 0) {
+      const itemIds = items.map((item) => {
+        if (!item.id || !mongoose.Types.ObjectId.isValid(item.id)) {
+          throw new Error("ID mục hàng không hợp lệ!");
+        }
+        return new mongoose.Types.ObjectId(item.id);
+      });
+
+      const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+        session
+      );
+      const itemMap = new Map(
+        foundItems.map((item) => [item._id.toString(), item])
+      );
+
+      for (const item of items) {
+        if (!item.quantity || item.quantity < 1) {
+          throw new Error("Số lượng phải là số dương!");
+        }
+        const itemExists = itemMap.get(item.id);
+        if (!itemExists) {
+          throw new Error(`Mục hàng với ID ${item.id} không tồn tại!`);
+        }
+        if (item.size) {
+          const validSize = itemExists.sizes.find((s) => s.name === item.size);
+          if (!validSize) {
+            throw new Error(
+              `Kích thước ${item.size} không hợp lệ cho mục hàng ${itemExists.name}!`
+            );
+          }
+        }
+      }
+
+      const itemOrders = items.map((item) => ({
+        item_id: new mongoose.Types.ObjectId(item.id),
+        quantity: item.quantity,
+        order_id: newOrder._id,
+        size: item.size || null,
+        note: item.note || "",
+      }));
+      await orderService.createItemOrders(itemOrders, { session });
+    }
+
+    // Cập nhật số tiền đơn hàng
+    await orderService.updateOrderAmounts(newOrder._id, session);
+
+    // Chuẩn bị phản hồi
+    const orderResponse = newOrder.toObject();
+    orderResponse.tables = selectedTableIds;
+    const tableInfosDetails = await TableInfo.find({ _id: { $in: selectedTableIds } })
+      .select("table_number area capacity")
+      .lean()
+      .session(session);
+    orderResponse.tableDetails = tableInfosDetails;
+    orderResponse.items = items || []; // Thêm danh sách món ăn vào phản hồi
+
+    // Hoàn tất giao dịch
+    await session.commitTransaction();
+
+    // Chuẩn bị phản hồi
+    const response = {
+      status: "SUCCESS",
+      message: "Đặt bàn và món ăn thành công!",
+      data: orderResponse,
+    };
+
+    // Gửi thông báo Socket.IO
+    const io = socket.getIO();
+    io.to("adminRoom").emit("newTableOrder", orderResponse);
+    console.log(`Đơn hàng đặt bàn mới: ${JSON.stringify(orderResponse, null, 2)}`);
+
+    // Gửi email xác nhận (nếu có user)
+    if (req.user?._id) {
+      setImmediate(async () => {
+        try {
+          const user = await getUserByUserId(req.user._id);
+          await emailService.sendOrderConfirmationEmail(
+            user.email,
+            user.name,
+            orderResponse
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email:", emailError.message);
+        }
+      });
+    }
+
+    return res.status(201).json(response);
+  } catch (error) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Đã xảy ra lỗi khi đặt bàn!",
+      data: null,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 const updateOrder = async (req, res) => {
   const session = await mongoose.startSession({
     defaultTransactionOptions: {
@@ -2229,6 +2441,7 @@ module.exports = {
   getOrderInfo,
   createOrder,
   createTableOrder,
+  reserveTable,
   updateOrder,
   getUserOrders,
   searchOrdersByCustomerId,

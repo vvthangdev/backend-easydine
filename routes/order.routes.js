@@ -14,6 +14,12 @@ router.post(
   orderController.createOrder
 );
 
+router.post(
+  "/reserve-table",
+  authMiddleware.authenticateToken,
+  orderController.reserveTable
+);
+
 router.post("/create-table-order",  orderController.createTableOrder);
 
 router.get(
