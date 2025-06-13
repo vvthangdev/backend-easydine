@@ -1,63 +1,28 @@
+// controllers/user.controller.js
 const User = require("../models/user.model.js");
-const OrderDetail = require("../models/order_detail.model.js")
+const OrderDetail = require("../models/order_detail.model.js");
 require("dotenv").config();
 const userService = require("../services/user.service");
-const { getIO } = require("../socket/socket.js")
+const { getIO } = require("../socket/socket.js");
 const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
+const userDto = require("../dtos/user.dto");
 
 const createUserByAdmin = async (req, res) => {
   try {
-    const {
-      username,
-      email,
-      password,
-      name,
-      phone,
-      address,
-      role,
-      avatar
-    } = req.body;
-
-    // Kiểm tra các trường bắt buộc
-    if (!username || !email || !password) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.createUserByAdminSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Username, email và password là bắt buộc!",
-        data: null,
-      });
-    }
-
-    // Kiểm tra định dạng email
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Email không hợp lệ!",
-        data: null,
-      });
-    }
-
-    // Kiểm tra độ dài mật khẩu
-    if (password.length < 8) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Mật khẩu phải có ít nhất 8 ký tự!",
-        data: null,
-      });
-    }
-
-    // Kiểm tra vai trò hợp lệ
-    if (role && !["ADMIN", "STAFF", "CUSTOMER"].includes(role)) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Vai trò không hợp lệ! Phải là ADMIN, STAFF hoặc CUSTOMER.",
+        message: error.details[0].message,
         data: null,
       });
     }
 
     // Kiểm tra sự tồn tại của username hoặc email
     const existingUser = await User.findOne({
-      $or: [{ username }, { email }],
+      $or: [{ username: value.username }, { email: value.email }],
     });
     if (existingUser) {
       return res.status(400).json({
@@ -69,27 +34,27 @@ const createUserByAdmin = async (req, res) => {
 
     // Mã hóa mật khẩu
     const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const hashedPassword = await bcrypt.hash(value.password, saltRounds);
 
     // Tạo dữ liệu người dùng mới
     const userData = {
-      username,
-      email,
+      username: value.username,
+      email: value.email,
       password: hashedPassword,
-      name: name || "",
-      phone: phone || "",
-      address: address || "",
-      role: role || "CUSTOMER",
-      avatar: avatar || "",
+      name: value.name || "",
+      phone: value.phone || "",
+      address: value.address || "",
+      role: value.role || "CUSTOMER",
+      avatar: value.avatar || "",
       isActive: true,
     };
 
-    await userService.createUser(userData);
+    const newUser = await userService.createUser(userData);
 
     return res.status(201).json({
       status: "SUCCESS",
       message: "Tạo người dùng thành công!",
-      data: "",
+      data: userDto.userResponseDTO(newUser),
     });
   } catch (error) {
     console.error("Lỗi khi tạo người dùng bởi admin:", error);
@@ -103,30 +68,23 @@ const createUserByAdmin = async (req, res) => {
 
 const deleteUserByAdmin = async (req, res) => {
   try {
-    const { id, username } = req.body;
-
-    if (!id && !username) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.deleteUserByAdminSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "ID hoặc username là bắt buộc trong body!",
+        message: error.details[0].message,
         data: null,
       });
     }
 
     let user;
-    if (id) {
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "ID người dùng không hợp lệ!",
-          data: null,
-        });
-      }
-      user = await User.findByIdAndDelete(id);
+    if (value.id) {
+      user = await User.findByIdAndDelete(value.id);
     } else {
-      user = await userService.getUserByUserName(username);
+      user = await userService.getUserByUserName(value.username);
       if (user) {
-        await userService.deleteUser(username);
+        await userService.deleteUser(value.username);
       }
     }
 
@@ -155,28 +113,21 @@ const deleteUserByAdmin = async (req, res) => {
 
 const updateUserByAdmin = async (req, res) => {
   try {
-    const { id, username, password, role, ...userInfo } = req.body;
-
-    if (!id && !username) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.updateUserByAdminSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "ID hoặc username là bắt buộc trong body!",
+        message: error.details[0].message,
         data: null,
       });
     }
 
     let user;
-    if (id) {
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({
-          status: "ERROR",
-          message: "ID người dùng không hợp lệ!",
-          data: null,
-        });
-      }
-      user = await User.findById(id);
+    if (value.id) {
+      user = await User.findById(value.id);
     } else {
-      user = await userService.getUserByUserName(username);
+      user = await userService.getUserByUserName(value.username);
     }
 
     if (!user) {
@@ -187,22 +138,25 @@ const updateUserByAdmin = async (req, res) => {
       });
     }
 
-    const updateData = { ...userInfo };
-    if (role && ["ADMIN", "STAFF", "CUSTOMER"].includes(role)) {
-      updateData.role = role;
-    }
-    if (password) {
+    const updateData = {
+      name: value.name,
+      email: value.email,
+      phone: value.phone,
+      address: value.address,
+      avatar: value.avatar,
+      role: value.role,
+    };
+
+    if (value.password) {
       const saltRounds = 10;
-      updateData.password = await bcrypt.hash(password, saltRounds);
+      updateData.password = await bcrypt.hash(value.password, saltRounds);
     }
 
-    if (userInfo.email || userInfo.username) {
+    // Kiểm tra email hoặc username trùng lặp
+    if (value.email || value.username) {
       const existingUser = await User.findOne({
-        $or: [
-          { email: updateData.email },
-          { username: updateData.username },
-        ],
-        _id: { $ne: id || user._id },
+        $or: [{ email: value.email }, { username: value.username }],
+        _id: { $ne: value.id || user._id },
       });
       if (existingUser) {
         return res.status(400).json({
@@ -214,9 +168,9 @@ const updateUserByAdmin = async (req, res) => {
     }
 
     let updatedUser;
-    if (id) {
+    if (value.id) {
       updatedUser = await User.findByIdAndUpdate(
-        id,
+        value.id,
         { $set: updateData },
         { new: true, select: "-password -refresh_token" }
       );
@@ -235,7 +189,7 @@ const updateUserByAdmin = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Cập nhật người dùng bởi admin thành công!",
-      data: updatedUser,
+      data: userDto.userResponseDTO(updatedUser),
     });
   } catch (error) {
     console.error("Lỗi khi cập nhật người dùng bởi admin:", error);
@@ -249,18 +203,18 @@ const updateUserByAdmin = async (req, res) => {
 
 const deactivateUser = async (req, res) => {
   try {
-    const { id } = req.body;
-
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.toggleUserStatusSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "ID người dùng hợp lệ là bắt buộc trong body!",
+        message: error.details[0].message,
         data: null,
       });
     }
 
     const user = await User.findByIdAndUpdate(
-      id,
+      value.id,
       { isActive: false },
       { new: true }
     );
@@ -275,7 +229,7 @@ const deactivateUser = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Khóa tài khoản thành công!",
-      data: user,
+      data: userDto.userResponseDTO(user),
     });
   } catch (error) {
     console.error("Lỗi khi khóa tài khoản:", error);
@@ -289,18 +243,18 @@ const deactivateUser = async (req, res) => {
 
 const activateUser = async (req, res) => {
   try {
-    const { id } = req.body;
-
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.toggleUserStatusSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "ID người dùng hợp lệ là bắt buộc trong body!",
+        message: error.details[0].message,
         data: null,
       });
     }
 
     const user = await User.findByIdAndUpdate(
-      id,
+      value.id,
       { isActive: true },
       { new: true }
     );
@@ -315,7 +269,7 @@ const activateUser = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Mở khóa tài khoản thành công!",
-      data: user,
+      data: userDto.userResponseDTO(user),
     });
   } catch (error) {
     console.error("Lỗi khi mở khóa tài khoản:", error);
@@ -329,35 +283,35 @@ const activateUser = async (req, res) => {
 
 const adminGetUserInfo = async (req, res) => {
   try {
-    const customerId = req.query.id;
-
-    if (!customerId) {
+    // Validate dữ liệu đầu vào (query)
+    const { error, value } = userDto.adminGetUserInfoSchema.validate(req.query);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Customer ID is required!",
+        message: error.details[0].message,
         data: null,
       });
     }
 
-    const customer = await userService.getUserByUserId(customerId);
+    const customer = await userService.getUserByUserId(value.id);
     if (!customer) {
       return res.status(404).json({
         status: "ERROR",
-        message: "Customer not found!",
+        message: "Không tìm thấy người dùng!",
         data: null,
       });
     }
 
     return res.status(200).json({
       status: "SUCCESS",
-      message: "Customer information retrieved successfully!",
-      data: customer,
+      message: "Lấy thông tin người dùng thành công!",
+      data: userDto.userResponseDTO(customer),
     });
   } catch (error) {
-    console.error("Error fetching customer info:", error);
+    console.error("Lỗi khi lấy thông tin người dùng:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: "An error occurred while fetching customer information!",
+      message: "Đã xảy ra lỗi khi lấy thông tin người dùng!",
       data: null,
     });
   }
@@ -368,13 +322,14 @@ const getAllStaff = async (req, res) => {
     const staff = await User.find({ role: { $in: ["ADMIN", "STAFF"] } });
     return res.status(200).json({
       status: "SUCCESS",
-      message: "Lấy danh sách người dùng thành công!",
-      data: staff,
+      message: "Lấy danh sách nhân viên thành công!",
+      data: staff.map(userDto.userResponseDTO),
     });
   } catch (error) {
+    console.error("Lỗi khi lấy danh sách nhân viên:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: "Lỗi khi lấy danh sách người dùng!",
+      message: "Đã xảy ra lỗi khi lấy danh sách nhân viên!",
       data: null,
     });
   }
@@ -382,42 +337,30 @@ const getAllStaff = async (req, res) => {
 
 const handlePaymentWebhook = async (req, res) => {
   try {
-    // Dữ liệu webhook gửi về là một mảng, lấy object đầu tiên
-    const webhookData = req.body;
-    console.log(webhookData)
-    if (!webhookData) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.paymentWebhookSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Invalid webhook data format",
+        message: error.details[0].message,
       });
     }
 
-    const { orderId, tenTaiKhoanDoiUng, soTaiKhoanDoiUng, ngayDienRa, giaTri } = webhookData;
-
-    // Kiểm tra dữ liệu đầu vào
-    if (!orderId || !giaTri || !ngayDienRa) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "orderId, giaTri, và ngayDienRa là bắt buộc!",
-      });
-    }
-
-    // Lấy customerId từ database dựa trên orderId
-    const order = await OrderDetail.findById(orderId);
+    const order = await OrderDetail.findById(value.orderId);
     if (!order) {
-      console.log(`[${new Date().toISOString()}] [Webhook] Order ${orderId} not found, still sending notification to adminRoom`);
+      console.log(`[${new Date().toISOString()}] [Webhook] Order ${value.orderId} not found, still sending notification to adminRoom`);
     }
 
     // Tạo thông báo
     const notification = {
       type: "PAYMENT_SUCCESS",
-      orderId,
+      orderId: value.orderId,
       customerId: order?.customer_id?.toString() || null,
-      accountName: tenTaiKhoanDoiUng || "Unknown",
-      accountNumber: soTaiKhoanDoiUng || "N/A",
-      transactionTime: ngayDienRa,
-      amount: giaTri,
-      message: `Payment successful for order ${orderId} at ${ngayDienRa} with amount ${giaTri}`,
+      accountName: value.tenTaiKhoanDoiUng || "Unknown",
+      accountNumber: value.soTaiKhoanDoiUng || "N/A",
+      transactionTime: value.ngayDienRa,
+      amount: value.giaTri,
+      message: `Payment successful for order ${value.orderId} at ${value.ngayDienRa} with amount ${value.giaTri}`,
       createdAt: new Date().toISOString(),
     };
 
@@ -425,19 +368,17 @@ const handlePaymentWebhook = async (req, res) => {
     const io = getIO();
     console.log(`[${new Date().toISOString()}] [Webhook] Sending paymentSuccess notification:`, notification);
 
-    // Gửi đến adminRoom
-    io.to("adminRoom").emit("paymentSuccess", notification);
-
-    // Gửi đến khách hàng nếu có customerId
+    io.to("adminRoom").emit("paymentSuccess", userDto.paymentWebhookResponseDTO(notification));
     if (order?.customer_id) {
-      io.to(`user:${order.customer_id}`).emit("paymentSuccess", notification);
+      io.to(`user:${order.customer_id}`).emit("paymentSuccess", userDto.paymentWebhookResponseDTO(notification));
     } else {
-      console.log(`[${new Date().toISOString()}] [Webhook] No customerId found for order ${orderId}`);
+      console.log(`[${new Date().toISOString()}] [Webhook] No customerId found for order ${value.orderId}`);
     }
 
     return res.status(200).json({
       status: "OK",
       message: "Webhook received and notification sent",
+      data: userDto.paymentWebhookResponseDTO(notification),
     });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] [Webhook] Error processing webhook:`, error.message);
@@ -447,6 +388,7 @@ const handlePaymentWebhook = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   createUserByAdmin,
   deleteUserByAdmin,
@@ -455,5 +397,5 @@ module.exports = {
   activateUser,
   adminGetUserInfo,
   getAllStaff,
-  handlePaymentWebhook
+  handlePaymentWebhook,
 };

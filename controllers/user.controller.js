@@ -5,18 +5,19 @@ const authUtil = require("../utils/auth.util");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const { Auth } = require("two-step-auth");
+const userDto = require("../dtos/user.dto.js")
 
 const getAllUsers = async (req, res) => {
   try {
     const users = await userService.getAllUsers({
-      refresh_token: 0, // Loại bỏ refresh_token
-      password: 0, // Loại bỏ password
+      refresh_token: 0,
+      password: 0,
     });
 
     return res.status(200).json({
       status: "SUCCESS",
       message: "Lấy danh sách người dùng thành công!",
-      data: users,
+      data: users.map(userDto.userResponseDTO), // Chuẩn hóa đầu ra
     });
   } catch (error) {
     console.error("Lỗi khi lấy danh sách người dùng:", error);
@@ -46,7 +47,7 @@ const userInfo = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Lấy thông tin người dùng thành công!",
-      data: user,
+      data: userDto.userResponseDTO(user), // Chuẩn hóa đầu ra
     });
   } catch (error) {
     console.error("Lỗi khi lấy thông tin người dùng:", error);
@@ -59,27 +60,30 @@ const userInfo = async (req, res) => {
 };
 
 const signUp = async (req, res) => {
-  let { email, password, ...otherFields } = req.body;
-
-  if (!password) {
-    return res.status(400).json({
-      status: "ERROR",
-      message: "Mật khẩu là bắt buộc!",
-      data: null,
-    });
-  }
-
   try {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.signUpSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
     const newUser = await userService.createUser({
-      email,
-      password,
-      ...otherFields,
+      email: value.email,
+      password: value.password,
+      username: value.username,
+      name: value.name,
+      address: value.address,
+      phone: value.phone,
     });
 
     return res.status(201).json({
       status: "SUCCESS",
       message: "Đăng ký thành công!",
-      data: { username: newUser.username },
+      data: userDto.userResponseDTO(newUser), // Chuẩn hóa đầu ra
     });
   } catch (error) {
     console.error("Lỗi khi đăng ký:", error);
@@ -92,10 +96,18 @@ const signUp = async (req, res) => {
 };
 
 const login = async (req, res) => {
-  let { email, password } = req.body;
-
   try {
-    const user = await userService.getUserByEmail(email);
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.loginSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
+    const user = await userService.getUserByEmail(value.email);
     if (!user) {
       return res.status(401).json({
         status: "ERROR",
@@ -105,7 +117,7 @@ const login = async (req, res) => {
     }
 
     const isPasswordValid = await userService.validatePassword(
-      password,
+      value.password,
       user.password
     );
     if (!isPasswordValid) {
@@ -117,7 +129,7 @@ const login = async (req, res) => {
     }
 
     const dataForAccessToken = {
-      _id: user._id.toString(), // Thêm _id vào payload
+      _id: user._id.toString(),
       username: user.username,
       role: user.role,
     };
@@ -163,17 +175,7 @@ const login = async (req, res) => {
       status: "SUCCESS",
       message: "Đăng nhập thành công!",
       data: {
-        id: user._id,
-        name: user.name,
-        role: user.role,
-        address: user.address,
-        avatar: user.avatar,
-        email: user.email,
-        username: user.username,
-        phone: user.phone,
-        googleId: user.googleId,
-        isActive: user.isActive,
-        phone: user.phone,
+        ...userDto.userResponseDTO(user), // Chuẩn hóa dữ liệu người dùng
         accessToken: `Bearer ${accessToken}`,
         refreshToken: `Bearer ${refreshToken}`,
       },
@@ -189,21 +191,20 @@ const login = async (req, res) => {
 };
 
 const refreshToken = async (req, res) => {
-  const {refreshToken} = req.body;
-  // console.log(`vvt check refreshtoken: ${refreshToken}`)
-
-  if (!refreshToken) {
-    return res.status(403).json({
-      status: "ERROR",
-      message: "Refresh token là bắt buộc!",
-      data: null,
-    });
-  }
-
   try {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.refreshTokenSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
     const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
     const decoded = await authUtil.verifyToken(
-      refreshToken,
+      value.refreshToken.replace("Bearer ", ""), // Loại bỏ "Bearer " nếu có
       refreshTokenSecret
     );
 
@@ -217,7 +218,7 @@ const refreshToken = async (req, res) => {
     }
 
     const dataForAccessToken = {
-      _id: user._id.toString(), // Thêm _id vào payload
+      _id: user._id.toString(),
       username: decoded.payload.username,
       role: decoded.payload.role,
     };
@@ -265,19 +266,19 @@ const logout = async (req, res) => {
 
 const updateUser = async (req, res) => {
   try {
-    const { ...otherFields } = req.body;
-
-    if (!otherFields || Object.keys(otherFields).length === 0) {
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.updateUserSchema.validate(req.body);
+    if (error) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Không có trường nào để cập nhật!",
+        message: error.details[0].message,
         data: null,
       });
     }
 
     const updatedUser = await userService.updateUser(
       req.user.username,
-      otherFields,
+      value,
       { refresh_token: 0, password: 0 }
     );
     if (!updatedUser) {
@@ -291,7 +292,7 @@ const updateUser = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Cập nhật người dùng thành công!",
-      data: null,
+      data: userDto.userResponseDTO(updatedUser), // Chuẩn hóa đầu ra
     });
   } catch (error) {
     console.error("Lỗi khi cập nhật người dùng:", error);
@@ -304,9 +305,19 @@ const updateUser = async (req, res) => {
 };
 
 const deleteUser = async (req, res) => {
-  let { password } = req.body;
-
   try {
+    // Validate dữ liệu đầu vào (mật khẩu bắt buộc)
+    const { error, value } = Joi.object({
+      password: Joi.string().min(8).required(),
+    }).validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
     const user = await userService.getUserByUserName(req.user.username);
     if (!user) {
       return res.status(404).json({
@@ -317,7 +328,7 @@ const deleteUser = async (req, res) => {
     }
 
     const isPasswordValid = await userService.validatePassword(
-      password,
+      value.password,
       user.password
     );
     if (!isPasswordValid) {
@@ -341,219 +352,166 @@ const deleteUser = async (req, res) => {
       status: "ERROR",
       message: "Đã xảy ra lỗi khi xóa người dùng!",
       data: null,
-    });
-  }
-};
-
-const sendOTP = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email || typeof email !== "string" || !/\S+@\S+\.\S+/.test(email)) {
-      return res.status(400).json({
+      });
+    }
+  };
+  
+  const sendOTP = async (req, res) => {
+    try {
+      // Validate dữ liệu đầu vào
+      const { error, value } = userDto.sendOTPSchema.validate(req.body);
+      if (error) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: error.details[0].message,
+          data: null,
+        });
+      }
+  
+      const res1 = await Auth(value.email, "");
+      console.log("Gửi OTP thành công:", {
+        email: res1.mail,
+        success: res1.success,
+      });
+  
+      return res.status(200).json({
+        status: "SUCCESS",
+        message: "Gửi OTP thành công!",
+        data: null,
+      });
+    } catch (error) {
+      console.error("Lỗi khi gửi OTP:", error);
+      return res.status(500).json({
         status: "ERROR",
-        message: "Địa chỉ email không hợp lệ!",
+        message: "Đã xảy ra lỗi khi gửi OTP!",
         data: null,
       });
     }
-
-    const res1 = await Auth(email, "");
-    console.log("Gửi OTP thành công:", {
-      email: res1.mail,
-      success: res1.success,
-    });
-
-    return res.status(200).json({
-      status: "SUCCESS",
-      message: "Gửi OTP thành công!",
-      data: null,
-    });
-  } catch (error) {
-    console.error("Lỗi khi gửi OTP:", error);
-    return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi gửi OTP!",
-      data: null,
-    });
-  }
-};
-
-const searchUsers = async (req, res) => {
-  try {
-    const { query } = req.query;
-
-    if (!query || query.trim() === "") {
-      return res.status(400).json({
+  };
+  
+  const searchUsers = async (req, res) => {
+    try {
+      // Validate dữ liệu đầu vào (query)
+      const { error, value } = userDto.searchUsersSchema.validate(req.query);
+      if (error) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: error.details[0].message,
+          data: null,
+        });
+      }
+  
+      const decodedQuery = decodeURIComponent(value.query.replace(/\+/g, " "));
+      const users = await userService.searchUsers(decodedQuery);
+  
+      return res.status(200).json({
+        status: "SUCCESS",
+        message: "Tìm kiếm người dùng thành công!",
+        data: users.map(userDto.userResponseDTO), // Chuẩn hóa đầu ra
+      });
+    } catch (error) {
+      console.error("Lỗi khi tìm kiếm người dùng:", error);
+      return res.status(500).json({
         status: "ERROR",
-        message: "Chuỗi tìm kiếm là bắt buộc!",
+        message: "Đã xảy ra lỗi khi tìm kiếm người dùng!",
         data: null,
       });
     }
-
-    const decodedQuery = decodeURIComponent(query.replace(/\+/g, " "));
-    const users = await userService.searchUsers(decodedQuery);
-
-    return res.status(200).json({
-      status: "SUCCESS",
-      message: "Tìm kiếm người dùng thành công!",
-      data: users,
-    });
-  } catch (error) {
-    console.error("Lỗi khi tìm kiếm người dùng:", error);
-    return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi tìm kiếm người dùng!",
-      data: null,
-    });
-  }
-};
-
-const getUserById = async (req, res) => {
-  try {
-    const { id } = req.body;
-
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
+  };
+  
+  const getUserById = async (req, res) => {
+    try {
+      // Validate dữ liệu đầu vào
+      const { error, value } = userDto.adminGetUserInfoSchema.validate(req.body);
+      if (error) {
+        return res.status(400).json({
+          status: "ERROR",
+          message: error.details[0].message,
+          data: null,
+        });
+      }
+  
+      const user = await User.findById(value.id, { refresh_token: 0, password: 0 });
+      if (!user) {
+        return res.status(404).json({
+          status: "ERROR",
+          message: "Không tìm thấy người dùng!",
+          data: null,
+        });
+      }
+  
+      return res.status(200).json({
+        status: "SUCCESS",
+        message: "Lấy thông tin người dùng thành công!",
+        data: userDto.userResponseDTO(user), // Chuẩn hóa đầu ra
+      });
+    } catch (error) {
+      console.error("Lỗi khi lấy người dùng theo ID:", error);
+      return res.status(500).json({
         status: "ERROR",
-        message: "ID người dùng hợp lệ là bắt buộc!",
+        message: "Đã xảy ra lỗi khi lấy thông tin người dùng!",
         data: null,
       });
     }
-
-    const user = await User.findById(id, { refresh_token: 0, password: 0 });
-    if (!user) {
-      return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy người dùng!",
-        data: null,
-      });
-    }
-
-    return res.status(200).json({
-      status: "SUCCESS",
-      message: "Lấy thông tin người dùng thành công!",
-      data: {
-        _id: user._id,
-        username: user.username,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        address: user.address,
-        avatar: user.avatar,
-        phone: user.phone,
-      },
-    });
-  } catch (error) {
-    console.error("Lỗi khi lấy người dùng theo ID:", error);
-    return res.status(500).json({
-      status: "ERROR",
-      message: "Đã xảy ra lỗi khi lấy thông tin người dùng!",
-      data: null,
-    });
-  }
-};
+  };
 
 const googleLoginCallback = async (req, res) => {
   try {
     const user = req.user;
 
     const dataForAccessToken = {
-      _id: user._id.toString(), // Thêm _id vào payload
+      _id: user._id.toString(),
       username: user.username,
       role: user.role,
     };
 
-    const accessTokenLife = process.env.ACCESS_TOKEN_LIFE;
-    const accessTokenSecret = process.env.ACCESS_TOKEN_SECRET;
     const accessToken = await authUtil.generateToken(
       dataForAccessToken,
-      accessTokenSecret,
-      accessTokenLife
+      process.env.ACCESS_TOKEN_SECRET,
+      process.env.ACCESS_TOKEN_LIFE
     );
 
-    const refreshTokenLife = process.env.REFRESH_TOKEN_LIFE;
-    const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
-    let refreshToken = await authUtil.generateToken(
+    let refreshToken = user.refresh_token || await authUtil.generateToken(
       dataForAccessToken,
-      refreshTokenSecret,
-      refreshTokenLife
+      process.env.REFRESH_TOKEN_SECRET,
+      process.env.REFRESH_TOKEN_LIFE
     );
 
     if (!user.refresh_token) {
       await userService.updateRefreshToken(user.username, refreshToken);
-    } else {
-      refreshToken = user.refresh_token;
     }
 
+    const userData = userDto.userResponseDTO(user); // Chuẩn hóa dữ liệu
     const redirectUrl = `${
       process.env.FRONTEND_URL
     }/login?accessToken=${accessToken}&refreshToken=${refreshToken}&userData=${encodeURIComponent(
-      JSON.stringify({
-        id: user._id,
-        name: user.name,
-        role: user.role,
-        address: user.address,
-        avatar: user.avatar,
-        email: user.email,
-        username: user.username,
-        phone: user.phone,
-      })
+      JSON.stringify(userData)
     )}`;
     return res.redirect(redirectUrl);
   } catch (error) {
     console.error("Lỗi khi đăng nhập Google:", error);
-    return res.redirect(
-      `${process.env.FRONTEND_URL}/login?error=google_login_failed`
-    );
+    return res.redirect(`${process.env.FRONTEND_URL}/login?error=google_login_failed`);
   }
 };
 
 const changePassword = async (req, res) => {
   try {
-    const { oldPassword, newPassword } = req.body;
-
-    if (!oldPassword || !newPassword) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Mật khẩu cũ và mới là bắt buộc!",
-        data: null,
-      });
-    }
+    // Validate dữ liệu đầu vào
+    const { error, value } = userDto.changePasswordSchema.validate(req.body);
+    if (error) return res.status(400).json({ status: "ERROR", message: error.details[0].message, data: null });
 
     const user = await User.findOne({ username: req.user.username });
-    if (!user) {
-      return res.status(404).json({
-        status: "ERROR",
-        message: "Không tìm thấy người dùng!",
-        data: null,
-      });
-    }
+    if (!user) return res.status(404).json({ status: "ERROR", message: "Không tìm thấy người dùng!", data: null });
 
     if (user.googleId && !user.password) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Tài khoản Google không thể đổi mật khẩu theo cách này!",
-        data: null,
-      });
+      return res.status(400).json({ status: "ERROR", message: "Tài khoản Google không thể đổi mật khẩu!", data: null });
     }
 
-    const isPasswordValid = await userService.validatePassword(
-      oldPassword,
-      user.password
-    );
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        status: "ERROR",
-        message: "Mật khẩu cũ không đúng!",
-        data: null,
-      });
-    }
+    const isPasswordValid = await userService.validatePassword(value.oldPassword, user.password);
+    if (!isPasswordValid) return res.status(401).json({ status: "ERROR", message: "Mật khẩu cũ không đúng!", data: null });
 
-    const saltRounds = 10;
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-    await userService.updateUser(req.user.username, {
-      password: hashedNewPassword,
-    });
+    const hashedNewPassword = await bcrypt.hash(value.newPassword, 10);
+    await userService.updateUser(req.user.username, { password: hashedNewPassword });
 
     return res.status(200).json({
       status: "SUCCESS",
@@ -564,7 +522,7 @@ const changePassword = async (req, res) => {
     console.error("Lỗi khi đổi mật khẩu:", error);
     return res.status(500).json({
       status: "ERROR",
-      message: "Đã xảy ra lỗi khi đổi mật khẩu!",
+      message: "Lỗi khi đổi mật khẩu!",
       data: null,
     });
   }
