@@ -99,7 +99,7 @@ const paymentWebhookSchema = Joi.object({
 
 // DTO cho dữ liệu người dùng
 const userResponseDTO = (user) => ({
-  id: user._id,
+  _id: user._id,
   username: user.username,
   email: user.email,
   name: user.name,
