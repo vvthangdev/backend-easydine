@@ -1579,6 +1579,7 @@ const createPayment = async (req, res) => {
     const vnpUrl = `${vnp_Url}?${qs.stringify(vnp_Params, { encode: false })}`;
 
     await session.commitTransaction();
+    console.log(`vvt check url v2: ${vnpUrl}`)
     return res.status(200).json({
       status: "SUCCESS",
       message: "Tạo URL thanh toán thành công!",
