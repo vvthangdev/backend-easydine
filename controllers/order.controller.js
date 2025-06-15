@@ -7,7 +7,7 @@ const Item = require("../models/item.model");
 const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
-const { calculateOrderTotal } = require("../services/voucher.service");
+const { calculateOrderTotal } = require("../utils/calculateOrder");
 
 const moment = require("moment");
 const qs = require("qs");

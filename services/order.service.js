@@ -3,7 +3,7 @@ const OrderDetail = require("../models/order_detail.model");
 const ReservationTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
-const { calculateOrderTotal } = require("../services/voucher.service");
+const { calculateOrderTotal } = require("../utils/calculateOrder");
 const mongoose = require('mongoose');
 
 async function createOrder(orderData, options = {}) {
