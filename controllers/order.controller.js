@@ -1582,7 +1582,7 @@ const createPayment = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Tạo URL thanh toán thành công!",
-      data: vnpUrl
+      data: { vnpUrl }
     });
   } catch (error) {
     await session.abortTransaction();
