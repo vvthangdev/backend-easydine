@@ -161,10 +161,33 @@ const createOrder = async (req, res) => {
 
     // Gửi thông báo Socket.IO với orderResponse đã có danh sách bàn
     const io = socket.getIO();
-    io.to("adminRoom").emit("newOrder", orderResponse);
-    console.log(`Đơn hàng mới: ${JSON.stringify(orderResponse, null, 2)}`);
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "CREATE_ORDER",
+      title: "Đơn hàng mới được tạo",
+      message: `Đơn hàng mới được tạo cho bàn ${
+        orderResponse.tableDetails[0]?.table_number || "N/A"
+      } (${orderResponse.tableDetails[0]?.area || "N/A"})`,
+      data: {
+        orderId: orderResponse._id.toString(),
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: orderResponse._id.toString() },
+      },
+    };
+    io.to("adminRoom").emit("notification", notification);
+    console.log(
+      `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
+    );
 
-    // Gửi email xác nhận (không chặn luồng chính)
+    // Gửi email xác nhận
     setImmediate(async () => {
       try {
         const user = await getUserByUserId(req.user._id);
@@ -174,7 +197,7 @@ const createOrder = async (req, res) => {
           orderResponse
         );
       } catch (emailError) {
-        console.error("Lỗi gửi email:", emailError.message);
+        console.error("Lỗi gửi email", emailError.message);
       }
     });
 
@@ -338,8 +361,31 @@ const createTableOrder = async (req, res) => {
 
     // Gửi thông báo Socket.IO
     const io = socket.getIO();
-    io.to("adminRoom").emit("newTableOrder", orderResponse);
-    console.log(`Đơn hàng bàn mới: ${JSON.stringify(orderResponse, null, 2)}`);
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "CREATE_ORDER",
+      title: "Đơn hàng bàn mới được tạo",
+      message: `Đơn hàng mới được tạo cho bàn ${
+        orderResponse.tableDetails[0]?.table_number || "N/A"
+      } (${orderResponse.tableDetails[0]?.area || "N/A"})`,
+      data: {
+        orderId: orderResponse._id.toString(),
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: orderResponse._id.toString() },
+      },
+    };
+    io.to("adminRoom").emit("notification", notification);
+    console.log(
+      `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
+    );
 
     return res.status(201).json(response);
   } catch (error) {
@@ -415,7 +461,9 @@ const reserveTable = async (req, res) => {
     );
 
     if (availableTableList.length === 0) {
-      throw new Error("Không có bàn nào khả dụng trong khoảng thời gian yêu cầu!");
+      throw new Error(
+        "Không có bàn nào khả dụng trong khoảng thời gian yêu cầu!"
+      );
     }
 
     // Tìm tổ hợp bàn phù hợp với số người
@@ -515,7 +563,9 @@ const reserveTable = async (req, res) => {
     // Chuẩn bị phản hồi
     const orderResponse = newOrder.toObject();
     orderResponse.tables = selectedTableIds;
-    const tableInfosDetails = await TableInfo.find({ _id: { $in: selectedTableIds } })
+    const tableInfosDetails = await TableInfo.find({
+      _id: { $in: selectedTableIds },
+    })
       .select("table_number area capacity")
       .lean()
       .session(session);
@@ -534,8 +584,31 @@ const reserveTable = async (req, res) => {
 
     // Gửi thông báo Socket.IO
     const io = socket.getIO();
-    io.to("adminRoom").emit("newTableOrder", orderResponse);
-    console.log(`Đơn hàng đặt bàn mới: ${JSON.stringify(orderResponse, null, 2)}`);
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "CREATE_ORDER",
+      title: "Đơn hàng đặt bàn mới được tạo",
+      message: `Đơn hàng mới được tạo cho bàn ${
+        orderResponse.tableDetails[0]?.table_number || "N/A"
+      } (${orderResponse.tableDetails[0]?.area || "N/A"})`,
+      data: {
+        orderId: orderResponse._id.toString(),
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: orderResponse._id.toString() },
+      },
+    };
+    io.to("adminRoom").emit("notification", notification);
+    console.log(
+      `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
+    );
 
     // Gửi email xác nhận (nếu có user)
     if (req.user?._id) {
@@ -576,15 +649,22 @@ const updateOrder = async (req, res) => {
   session.startTransaction();
 
   try {
-    const { id, start_time, end_time, tables, items, ...otherFields } = req.body;
+    const { id, start_time, end_time, tables, items, ...otherFields } =
+      req.body;
 
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ status: "ERROR", message: "ID đơn hàng sai rồi!", data: null });
+      return res
+        .status(400)
+        .json({ status: "ERROR", message: "ID đơn hàng sai rồi!", data: null });
     }
 
     const order = await OrderDetail.findById(id).session(session);
     if (!order) {
-      return res.status(404).json({ status: "ERROR", message: "Đơn hàng không tìm thấy!", data: null });
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Đơn hàng không tìm thấy!",
+        data: null,
+      });
     }
 
     const updateData = { ...otherFields };
@@ -595,7 +675,10 @@ const updateOrder = async (req, res) => {
       updateData.staff_id = req.user._id;
     }
 
-    if (["completed", "canceled"].includes(otherFields.status) && order.type === "reservation") {
+    if (
+      ["completed", "canceled"].includes(otherFields.status) &&
+      order.type === "reservation"
+    ) {
       await ReservedTable.updateMany(
         { reservation_id: id },
         { end_time: new Date() },
@@ -603,31 +686,48 @@ const updateOrder = async (req, res) => {
       );
     }
 
-    const updatedOrder = await orderService.updateOrder(id, updateData, { session });
+    const updatedOrder = await orderService.updateOrder(id, updateData, {
+      session,
+    });
     if (!updatedOrder) {
-      return res.status(404).json({ status: "ERROR", message: "Update thất bại, đơn không thấy!", data: null });
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Update thất bại, đơn không thấy!",
+        data: null,
+      });
     }
 
     if (order.type === "reservation" && tables) {
       if (tables.length > 0) {
         if (!start_time) {
-          return res.status(400).json({ status: "ERROR", message: "Thiếu start_time để đặt bàn!", data: null });
+          return res.status(400).json({
+            status: "ERROR",
+            message: "Thiếu start_time để đặt bàn!",
+            data: null,
+          });
         }
 
         const startTime = new Date(start_time);
-        const defaultEndTime = new Date(startTime.getTime() + 4 * 60 * 60 * 1000);
+        const defaultEndTime = new Date(
+          startTime.getTime() + 4 * 60 * 60 * 1000
+        );
         const maxEndTime = new Date(startTime);
         maxEndTime.setHours(23, 59, 0, 0);
 
         let commonEndTime = end_time
           ? new Date(end_time) < startTime
             ? maxEndTime
-            : new Date(Math.min(new Date(end_time).getTime(), maxEndTime.getTime()))
+            : new Date(
+                Math.min(new Date(end_time).getTime(), maxEndTime.getTime())
+              )
           : new Date(Math.min(defaultEndTime.getTime(), maxEndTime.getTime()));
 
         const tableIds = tables.map((table) => table.tableId || table);
-        const tableInfos = await TableInfo.find({ _id: { $in: tableIds } }).session(session);
-        if (tableInfos.length !== tableIds.length) throw new Error("Có bàn không tồn tại!");
+        const tableInfos = await TableInfo.find({
+          _id: { $in: tableIds },
+        }).session(session);
+        if (tableInfos.length !== tableIds.length)
+          throw new Error("Có bàn không tồn tại!");
 
         await ReservedTable.deleteMany({ reservation_id: id }).session(session);
         const newReservations = tables.map((table) => ({
@@ -637,7 +737,12 @@ const updateOrder = async (req, res) => {
           end_time: table.end_time
             ? new Date(table.end_time) < startTime
               ? maxEndTime
-              : new Date(Math.min(new Date(table.end_time).getTime(), maxEndTime.getTime()))
+              : new Date(
+                  Math.min(
+                    new Date(table.end_time).getTime(),
+                    maxEndTime.getTime()
+                  )
+                )
             : commonEndTime,
         }));
         await orderService.createReservations(newReservations, { session });
@@ -649,16 +754,29 @@ const updateOrder = async (req, res) => {
     if (items) {
       await ItemOrder.deleteMany({ order_id: id }).session(session);
       if (items.length > 0) {
-        const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
-        const foundItems = await Item.find({ _id: { $in: itemIds } }).session(session);
-        const itemMap = new Map(foundItems.map((item) => [item._id.toString(), item]));
+        const itemIds = items.map(
+          (item) => new mongoose.Types.ObjectId(item.id)
+        );
+        const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
+          session
+        );
+        const itemMap = new Map(
+          foundItems.map((item) => [item._id.toString(), item])
+        );
 
         for (const item of items) {
-          if (!item.quantity || item.quantity < 1) throw new Error("Số lượng món phải lớn hơn 0!");
+          if (!item.quantity || item.quantity < 1)
+            throw new Error("Số lượng món phải lớn hơn 0!");
           const itemExists = itemMap.get(item.id);
-          if (!itemExists) throw new Error(`Món ${item.id} không có trong menu!`);
-          if (item.size && !itemExists.sizes.find((s) => s.name === item.size)) {
-            throw new Error(`Size ${item.size} không hợp lệ cho món ${itemExists.name}!`);
+          if (!itemExists)
+            throw new Error(`Món ${item.id} không có trong menu!`);
+          if (
+            item.size &&
+            !itemExists.sizes.find((s) => s.name === item.size)
+          ) {
+            throw new Error(
+              `Size ${item.size} không hợp lệ cho món ${itemExists.name}!`
+            );
           }
         }
 
@@ -793,9 +911,15 @@ const getOrderInfo = async (req, res) => {
       area: table.area,
       capacity: table.capacity,
       status: order.status === "pending" ? "Reserved" : "Occupied",
-      start_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.start_time || null,
-      end_time: reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time || null,
-      people_assigned: reservedTables.find((rt) => rt.table_id.equals(table._id))?.people_assigned || null,
+      start_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))
+          ?.start_time || null,
+      end_time:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))?.end_time ||
+        null,
+      people_assigned:
+        reservedTables.find((rt) => rt.table_id.equals(table._id))
+          ?.people_assigned || null,
     }));
 
     // Lấy thông tin món ăn
@@ -805,7 +929,10 @@ const getOrderInfo = async (req, res) => {
     const itemMap = new Map(items.map((item) => [item._id.toString(), item]));
     const enrichedItemOrders = itemOrders.map((itemOrder) => {
       const item = itemMap.get(itemOrder.item_id.toString());
-      const sizeInfo = item && itemOrder.size ? item.sizes.find((s) => s.name === itemOrder.size) : null;
+      const sizeInfo =
+        item && itemOrder.size
+          ? item.sizes.find((s) => s.name === itemOrder.size)
+          : null;
       return {
         _id: itemOrder._id,
         item_id: item ? item._id : itemOrder.item_id,
@@ -833,7 +960,9 @@ const getOrderInfo = async (req, res) => {
         total_amount: order.total_amount,
         discount_amount: order.discount_amount,
         final_amount: order.final_amount,
-        payment_methods: order.payment_method ? [{ method: order.payment_method, amount: order.final_amount }] : [],
+        payment_methods: order.payment_method
+          ? [{ method: order.payment_method, amount: order.final_amount }]
+          : [],
         payment_status: order.payment_status || "pending",
         star: order.star || null,
         comment: order.comment || null,
@@ -1166,8 +1295,12 @@ const splitOrder = async (req, res) => {
     await orderService.updateOrderAmounts(newOrder._id, session);
 
     // Tải lại thông tin đơn hàng để lấy giá trị cập nhật
-    const updatedOriginalOrder = await OrderDetail.findById(originalOrder._id).session(session);
-    const updatedNewOrder = await OrderDetail.findById(newOrder._id).session(session);
+    const updatedOriginalOrder = await OrderDetail.findById(
+      originalOrder._id
+    ).session(session);
+    const updatedNewOrder = await OrderDetail.findById(newOrder._id).session(
+      session
+    );
 
     await session.commitTransaction();
 
@@ -1482,7 +1615,7 @@ const createPayment = async (req, res) => {
       return res.status(400).json({
         status: "ERROR",
         message: "Yêu cầu phải có order_id hợp lệ!",
-        data: ""
+        data: "",
       });
     }
 
@@ -1494,26 +1627,29 @@ const createPayment = async (req, res) => {
     }
 
     // Kiểm tra đơn hàng
-    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    const order = await mongoose
+      .model("OrderDetail")
+      .findById(order_id)
+      .session(session);
     if (!order) {
       return res.status(404).json({
         status: "ERROR",
         message: "Không tìm thấy đơn hàng!",
-        data: ""
+        data: "",
       });
     }
     if (order.status !== "confirmed") {
       return res.status(400).json({
         status: "ERROR",
         message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
-        data: ""
+        data: "",
       });
     }
     if (order.payment_status === "success") {
       return res.status(400).json({
         status: "ERROR",
         message: "Đơn hàng đã được thanh toán!",
-        data: ""
+        data: "",
       });
     }
 
@@ -1534,18 +1670,29 @@ const createPayment = async (req, res) => {
 
     // Cấu hình VNPay
     process.env.TZ = "Asia/Ho_Chi_Minh";
-    const vnp_Url = process.env.VNPAY_URL || "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-    const vnp_ReturnUrl = process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
+    const vnp_Url =
+      process.env.VNPAY_URL ||
+      "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+    const vnp_ReturnUrl =
+      process.env.VNPAY_RETURN_URL || "http://localhost:3000/payment-return";
     const vnp_CreateDate = moment(new Date()).format("YYYYMMDDHHmmss");
     const vnp_TxnRef = order_id;
-    const orderData = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    const orderData = await mongoose
+      .model("OrderDetail")
+      .findById(order_id)
+      .session(session);
     const vnp_Amount = orderData.final_amount * 100; // VNPay yêu cầu nhân 100
     const vnp_IpAddr = req.headers["x-forwarded-for"] || req.ip || "127.0.0.1";
     const vnp_Locale = language || "vn";
     const vnp_CurrCode = "VND";
-    const vnp_OrderInfo = `Thanh toan don hang ${order_id}`.replace(/[^a-zA-Z0-9 ]/g, "");
+    const vnp_OrderInfo = `Thanh toan don hang ${order_id}`.replace(
+      /[^a-zA-Z0-9 ]/g,
+      ""
+    );
     const vnp_OrderType = "other";
-    const vnp_ExpireDate = txtexpire || moment(new Date()).add(30, "minutes").format("YYYYMMDDHHmmss");
+    const vnp_ExpireDate =
+      txtexpire ||
+      moment(new Date()).add(30, "minutes").format("YYYYMMDDHHmmss");
 
     // Tạo params
     let vnp_Params = {
@@ -1572,18 +1719,20 @@ const createPayment = async (req, res) => {
     vnp_Params = sortObject(vnp_Params);
     const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", vnp_HashSecret);
-    const vnp_SecureHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const vnp_SecureHash = hmac
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
     vnp_Params.vnp_SecureHash = vnp_SecureHash;
 
     // Tạo URL
     const vnpUrl = `${vnp_Url}?${qs.stringify(vnp_Params, { encode: false })}`;
 
     await session.commitTransaction();
-    console.log(`vvt check url v2: ${vnpUrl}`)
+    console.log(`vvt check url v2: ${vnpUrl}`);
     return res.status(200).json({
       status: "SUCCESS",
       message: "Tạo URL thanh toán thành công!",
-      data: { vnpUrl }
+      data: { vnpUrl },
     });
   } catch (error) {
     await session.abortTransaction();
@@ -1591,7 +1740,7 @@ const createPayment = async (req, res) => {
     return res.status(500).json({
       status: "ERROR",
       message: error.message || "Đã xảy ra lỗi khi tạo thanh toán!",
-      data: ""
+      data: "",
     });
   } finally {
     session.endSession();
@@ -1616,31 +1765,48 @@ const handlePaymentIPN = async (req, res) => {
     // Sắp xếp và tạo chữ ký
     const signData = qs.stringify(sortObject(vnp_Params), { encode: false });
     const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const calculatedHash = hmac
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
 
     // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
       await session.abortTransaction();
-      return res.status(200).json({ status: "ERROR", message: "Sai chữ ký!", data: "" });
+      return res
+        .status(200)
+        .json({ status: "ERROR", message: "Sai chữ ký!", data: "" });
     }
 
     // Kiểm tra đơn hàng
-    const order = await mongoose.model("OrderDetail").findById(order_id).session(session);
+    const order = await mongoose
+      .model("OrderDetail")
+      .findById(order_id)
+      .session(session);
     if (!order) {
       await session.abortTransaction();
-      return res.status(200).json({ status: "ERROR", message: "Không tìm thấy đơn hàng!", data: "" });
+      return res.status(200).json({
+        status: "ERROR",
+        message: "Không tìm thấy đơn hàng!",
+        data: "",
+      });
     }
 
     // Kiểm tra số tiền
     if (order.final_amount !== vnp_Amount) {
       await session.abortTransaction();
-      return res.status(200).json({ status: "ERROR", message: "Số tiền không hợp lệ!", data: "" });
+      return res
+        .status(200)
+        .json({ status: "ERROR", message: "Số tiền không hợp lệ!", data: "" });
     }
 
     // Kiểm tra trạng thái
     if (order.payment_status === "success" || order.status === "completed") {
       await session.abortTransaction();
-      return res.status(200).json({ status: "ERROR", message: "Đơn hàng đã được xử lý!", data: "" });
+      return res.status(200).json({
+        status: "ERROR",
+        message: "Đơn hàng đã được xử lý!",
+        data: "",
+      });
     }
 
     // Cập nhật trạng thái
@@ -1656,7 +1822,9 @@ const handlePaymentIPN = async (req, res) => {
       );
 
       // Cập nhật end_time trong ReservationTable
-      const reservation = await ReservedTable.findOne({ reservation_id: order_id }).session(session);
+      const reservation = await ReservedTable.findOne({
+        reservation_id: order_id,
+      }).session(session);
       if (reservation) {
         const currentTime = new Date();
         const endTime = new Date(currentTime.getTime() - 60 * 1000); // Trừ 1 phút
@@ -1669,11 +1837,13 @@ const handlePaymentIPN = async (req, res) => {
 
       // Cập nhật voucher nếu có
       if (order.voucher_id) {
-        await mongoose.model("Voucher").findByIdAndUpdate(
-          order.voucher_id,
-          { $inc: { usedCount: 1 } },
-          { session }
-        );
+        await mongoose
+          .model("Voucher")
+          .findByIdAndUpdate(
+            order.voucher_id,
+            { $inc: { usedCount: 1 } },
+            { session }
+          );
       }
 
       // Gửi thông báo Socket.IO
@@ -1710,11 +1880,17 @@ const handlePaymentIPN = async (req, res) => {
     }
 
     await session.commitTransaction();
-    return res.status(200).json({ status: "SUCCESS", message: "Xử lý IPN thành công!", data: "" });
+    return res
+      .status(200)
+      .json({ status: "SUCCESS", message: "Xử lý IPN thành công!", data: "" });
   } catch (error) {
     await session.abortTransaction();
-    console.error(`Lỗi trong handlePaymentIPN cho đơn hàng ${req.query.vnp_TxnRef}: ${error.message}`);
-    return res.status(200).json({ status: "ERROR", message: "Lỗi không xác định!", data: "" });
+    console.error(
+      `Lỗi trong handlePaymentIPN cho đơn hàng ${req.query.vnp_TxnRef}: ${error.message}`
+    );
+    return res
+      .status(200)
+      .json({ status: "ERROR", message: "Lỗi không xác định!", data: "" });
   } finally {
     session.endSession();
   }
@@ -1731,7 +1907,9 @@ const handlePaymentReturn = async (req, res) => {
     vnp_Params = sortObject(vnp_Params);
     const signData = qs.stringify(vnp_Params, { encode: false });
     const hmac = crypto.createHmac("sha512", process.env.VNPAY_HASH_SECRET);
-    const calculatedHash = hmac.update(Buffer.from(signData, "utf-8")).digest("hex");
+    const calculatedHash = hmac
+      .update(Buffer.from(signData, "utf-8"))
+      .digest("hex");
 
     const order_id = vnp_Params.vnp_TxnRef;
     const vnp_ResponseCode = vnp_Params.vnp_ResponseCode;
@@ -1740,14 +1918,20 @@ const handlePaymentReturn = async (req, res) => {
     const order = await mongoose.model("OrderDetail").findById(order_id);
     if (!order) {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent("Không tìm thấy đơn hàng!")}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-failed?message=${encodeURIComponent(
+          "Không tìm thấy đơn hàng!"
+        )}`
       );
     }
 
     // Kiểm tra chữ ký
     if (calculatedHash !== vnp_SecureHash) {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent("Sai chữ ký!")}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-failed?message=${encodeURIComponent("Sai chữ ký!")}`
       );
     }
 
@@ -1756,33 +1940,45 @@ const handlePaymentReturn = async (req, res) => {
       "00": "Giao dịch thành công",
       "07": "Giao dịch bị nghi ngờ gian lận",
       "09": "Thẻ/Tài khoản chưa đăng ký Internet Banking",
-      "10": "Xác thực thẻ/tài khoản không đúng quá 3 lần",
-      "11": "Hết hạn chờ thanh toán",
-      "12": "Thẻ/Tài khoản bị khóa",
-      "13": "Sai OTP",
-      "24": "Khách hàng hủy giao dịch",
-      "51": "Tài khoản không đủ số dư",
-      "65": "Vượt hạn mức giao dịch trong ngày",
-      "75": "Ngân hàng đang bảo trì",
-      "79": "Sai mật khẩu thanh toán quá số lần",
-      "97": "Sai chữ ký",
-      "99": "Lỗi không xác định",
+      10: "Xác thực thẻ/tài khoản không đúng quá 3 lần",
+      11: "Hết hạn chờ thanh toán",
+      12: "Thẻ/Tài khoản bị khóa",
+      13: "Sai OTP",
+      24: "Khách hàng hủy giao dịch",
+      51: "Tài khoản không đủ số dư",
+      65: "Vượt hạn mức giao dịch trong ngày",
+      75: "Ngân hàng đang bảo trì",
+      79: "Sai mật khẩu thanh toán quá số lần",
+      97: "Sai chữ ký",
+      99: "Lỗi không xác định",
     };
 
-    const message = errorMessages[vnp_ResponseCode] || `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
+    const message =
+      errorMessages[vnp_ResponseCode] ||
+      `Giao dịch thất bại với mã ${vnp_ResponseCode}`;
     if (vnp_ResponseCode === "00") {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-success?order_id=${order_id}&message=${encodeURIComponent(message)}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-success?order_id=${order_id}&message=${encodeURIComponent(
+          message
+        )}`
       );
     } else {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(message)}`
+        `${
+          process.env.FRONTEND_URL
+        }/payment-failed?message=${encodeURIComponent(message)}`
       );
     }
   } catch (error) {
-    console.error(`Lỗi trong handlePaymentReturn cho đơn hàng ${req.query.vnp_TxnRef}: ${error.message}`);
+    console.error(
+      `Lỗi trong handlePaymentReturn cho đơn hàng ${req.query.vnp_TxnRef}: ${error.message}`
+    );
     return res.redirect(
-      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent("Lỗi xử lý thanh toán!")}`
+      `${process.env.FRONTEND_URL}/payment-failed?message=${encodeURIComponent(
+        "Lỗi xử lý thanh toán!"
+      )}`
     );
   }
 };
@@ -1954,6 +2150,95 @@ const addItemsToOrder = async (req, res) => {
         newSession.endSession();
       }
     });
+
+    // Gửi thông báo Socket.IO
+    const io = socket.getIO();
+    // Lấy thông tin bàn từ ReservedTable và TableInfo (không dùng session vì giao dịch đã commit)
+    let tableInfo = "N/A";
+    try {
+      const reservedTables = await ReservedTable.find({
+        reservation_id: order._id,
+      })
+        .populate("table_id", "table_number area")
+        .lean();
+      tableInfo =
+        reservedTables.length > 0
+          ? reservedTables
+              .map(
+                (table) =>
+                  `${table.table_id.table_number} (${table.table_id.area})`
+              )
+              .join(", ")
+          : "N/A";
+    } catch (socketError) {
+      console.error(
+        "[Socket.IO] Lỗi khi lấy thông tin bàn:",
+        socketError.message
+      );
+    }
+
+    // Tạo danh sách món được thêm từ req.body.items
+    const addedItems = items.map((item) => {
+      const itemDetails = itemMap.get(item.id);
+      const sizeInfo =
+        item.size && itemDetails?.sizes
+          ? itemDetails.sizes.find((s) => s.name === item.size)
+          : null;
+      return {
+        item_id: item.id,
+        quantity: item.quantity,
+        size: item.size || null,
+        note: item.note || "",
+        itemName: itemDetails?.name || "Unknown",
+        itemImage: itemDetails?.image || null,
+        itemPrice: sizeInfo ? sizeInfo.price : itemDetails?.price || 0,
+      };
+    });
+
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "ORDER_ITEMS_UPDATE",
+      title: "Món ăn được thêm vào đơn hàng",
+      message: `Đã thêm món vào đơn hàng cho bàn ${tableInfo}: ${items
+        .map(
+          (i) =>
+            `${i.quantity} x ${itemMap.get(i.id)?.name || i.id}${
+              i.size ? ` (${i.size})` : ""
+            }`
+        )
+        .join(", ")}`,
+      data: {
+        orderId: order._id.toString(),
+        type: order.type,
+        status: order.status,
+        table: tableInfo,
+        time: order.time
+          .toLocaleString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          })
+          .replace(",", ""),
+        addedItems, // Chỉ gửi các món được thêm từ req.body.items
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: order._id.toString() },
+      },
+    };
+    io.to("adminRoom").emit("orderUpdate", notification);
+    console.log(
+      `[Socket.IO] Emitted ORDER_ITEMS_UPDATE orderUpdate: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
+    );
 
     return res.status(200).json({
       status: "SUCCESS",
@@ -2174,35 +2459,75 @@ const cancelItems = async (req, res) => {
     );
 
     // Gửi thông báo Socket.IO
-    setImmediate(async () => {
-      try {
-        const { io, adminSockets } = require("../app");
-        const notification = {
-          orderId: order._id.toString(),
-          customerId: order.customer_id.toString(),
-          type: order.type,
-          status: order.status,
-          staffId: req.user?._id?.toString() || null,
-          time: order.time.toISOString(),
-          createdAt: new Date().toISOString(),
-          message: `Items canceled in order ${order._id}: ${items
-            .map(
-              (i) =>
-                `${i.quantity} x ${itemMap.get(i.item_id)?.name || i.item_id}${
-                  i.size ? ` (${i.size})` : ""
-                }`
-            )
-            .join(", ")}`,
-          canceledItems: enrichedCanceledItems,
-          remainingItems: enrichedRemainingItems,
-        };
-        adminSockets.forEach((socket) => {
-          socket.emit("orderItemsUpdate", notification);
-        });
-      } catch (error) {
-        console.error("Error sending notification:", error.message);
-      }
-    });
+    const io = socket.getIO();
+    // Lấy thông tin bàn từ ReservedTable và TableInfo (không dùng session vì giao dịch đã commit)
+    let tableInfo = "N/A";
+    try {
+      const reservedTables = await ReservedTable.find({
+        reservation_id: order._id,
+      })
+        .populate("table_id", "table_number area")
+        .lean();
+      tableInfo =
+        reservedTables.length > 0
+          ? reservedTables
+              .map(
+                (table) =>
+                  `${table.table_id.table_number} (${table.table_id.area})`
+              )
+              .join(", ")
+          : "N/A";
+    } catch (socketError) {
+      console.error(
+        "[Socket.IO] Lỗi khi lấy thông tin bàn:",
+        socketError.message
+      );
+    }
+
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "ORDER_ITEMS_UPDATE",
+      title: "Món ăn bị hủy khỏi đơn hàng",
+      message: `Đã hủy món khỏi đơn hàng cho bàn ${tableInfo}: ${items
+        .map(
+          (i) =>
+            `${i.quantity} x ${itemMap.get(i.item_id)?.name || i.item_id}${
+              i.size ? ` (${i.size})` : ""
+            }`
+        )
+        .join(", ")}`,
+      data: {
+        orderId: order._id.toString(),
+        type: order.type,
+        status: order.status,
+        table: tableInfo,
+        time: order.time
+          .toLocaleString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          })
+          .replace(",", ""),
+        canceledItems: enrichedCanceledItems, // Danh sách món bị hủy từ req.body.items
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: order._id.toString() },
+      },
+    };
+    io.to("adminRoom").emit("orderUpdate", notification);
+    console.log(
+      `[Socket.IO] Emitted ORDER_ITEMS_UPDATE orderUpdate: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
+    );
 
     setImmediate(async () => {
       const newSession = await mongoose.startSession();
@@ -2239,45 +2564,54 @@ const cancelItems = async (req, res) => {
   }
 };
 
-const testNewOrder = async (req, res) => {
+const testNewOrder1 = async (req, res) => {
   try {
     const io = socket.getIO(); // Lấy instance io
 
-    // Dữ liệu giả lập đơn hàng mới
+    // Dữ liệu giả lập thông báo đơn hàng mới
     const notification = {
-      orderId: "test123",
-      customerId: req.user?._id || "testUser123",
-      username: req.user?.username || "testUser",
-      type: "reservation",
-      createdAt: new Date().toISOString(),
-      message: "Test new order 02",
-      tables: ["68121990c68baaa9ac9fb684"], // Thêm tables để khớp với orderResponse trước đó
-      tableDetails: [
-        {
-          _id: "68121990c68baaa9ac9fb684",
-          table_number: 105,
+      id: `notif_${Date.now()}`, // ID duy nhất cho thông báo
+      type: "UPDATE_ORDER",
+      title: "Món ăn cho mèo",
+      message: `Món Bia heineken (x1) đã được thêm vào đơn hàng #test123`,
+      data: {
+        orderId: "test123",
+        table: {
+          tableNumber: 101,
           area: "Tầng 1",
         },
-      ],
-      staff_id: req.user?._id || "6811ff6de5541de1a1e96b1d",
-      status: "confirmed",
-      transaction_id: null,
-      vnp_transaction_no: null,
-      payment_status: "pending",
-      voucher_id: null,
-      total_amount: 0,
-      discount_amount: 0,
-      final_amount: 0,
-      _id: "683546d579b89ae594a6bc71",
-      __v: 0,
+        item: {
+          itemId: "68138d0e7ffb41397fb436de",
+          itemName: "Bia heineken",
+          quantity: 1,
+          size: null,
+          note: "",
+          itemPrice: 35000,
+        },
+        customerId: req.user?._id || "testUser123",
+        username: req.user?.username || "testUser",
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: "test123" },
+      },
     };
 
-    // Gửi sự kiện newOrder đến adminRoom
-    io.to("adminRoom").emit("newOrder", notification);
+    // Log dữ liệu gửi đi
     console.log(
-      `[Socket.IO] Emitted newOrder to adminRoom for test order ${notification.orderId}`
+      "[testNewOrder2] Dữ liệu thông báo gửi đi:",
+      JSON.stringify(notification, null, 2)
     );
 
+    // Gửi sự kiện notification đến adminRoom
+    io.to("adminRoom").emit("notification", notification);
+    console.log(
+      `[Socket.IO] Emitted notification to adminRoom for order ${notification.data.orderId}`
+    );
+
+    // Trả về response
     res.json({
       status: "SUCCESS",
       message: "Thông báo test đơn hàng gửi thành công",
@@ -2295,36 +2629,210 @@ const testNewOrder = async (req, res) => {
 const testNewOrder2 = async (req, res) => {
   try {
     const io = socket.getIO(); // Lấy instance io
+    const { type = "ADD_ITEM" } = req.body; // Lấy type từ body JSON
 
-    // Dữ liệu giả lập đơn hàng mới
-    const notification = {
-      orderId: "test123",
-      customerId: req.user?._id || "testUser123",
-      username: req.user?.username || "testUser",
-      type: "reservation",
-      createdAt: new Date().toISOString(),
-      message: "Test new order 02",
+    // Dữ liệu giả lập thông báo
+    let notification;
+    const orderId = "test123";
+    const customerId = req.user?._id || "6811ff6de5541de1a1e96b1d";
+    const username = req.user?.username || "testUser";
+    const table = {
+      tableNumber: 101,
+      area: "Tầng 2",
     };
+    const timestamp = new Date().toISOString();
+    const id = `notif_${Date.now()}`;
 
-    // Gửi sự kiện newOrder đến adminRoom
-    io.to("adminRoom").emit("newOrder", notification);
+    switch (type) {
+      case "CREATE_ORDER":
+        notification = {
+          id,
+          type: "CREATE_ORDER",
+          title: "Đơn hàng mới được tạo",
+          message: `Đơn hàng #${orderId} đã được tạo cho bàn ${table.tableNumber} (${table.area})`,
+          data: {
+            orderId,
+            table,
+            order: {
+              type: "reservation",
+              status: "pending", // Thay confirmed thành pending để đúng ngữ cảnh
+            },
+            item: {
+              itemName: "Bia heineken",
+              quantity: 1,
+              note: "Không đá",
+            },
+            customerId,
+            username,
+          },
+          timestamp,
+          action: {
+            label: "Xem chi tiết",
+            type: "VIEW_DETAILS",
+            payload: { orderId },
+          },
+        };
+        break;
+
+      case "ADD_ITEM":
+        notification = {
+          id,
+          type: "ADD_ITEM",
+          title: "Món mới được thêm",
+          message: `Món Bia heineken (x1) đã được thêm vào đơn hàng #${orderId}`,
+          data: {
+            orderId,
+            table,
+            item: {
+              itemName: "Bia heineken",
+              quantity: 1,
+              note: "Không đá",
+            },
+            customerId,
+            username,
+          },
+          timestamp,
+          action: {
+            label: "Xem chi tiết",
+            type: "VIEW_DETAILS",
+            payload: { orderId },
+          },
+        };
+        break;
+
+      case "DELETE_ITEM":
+        notification = {
+          id,
+          type: "DELETE_ITEM",
+          title: "Món đã bị hủy",
+          message: `Món Đậu luộc (x1) đã bị hủy khỏi đơn hàng #${orderId}`,
+          data: {
+            orderId,
+            table,
+            item: {
+              itemName: "Đậu luộc",
+              quantity: 1,
+              note: "",
+            },
+            customerId,
+            username,
+          },
+          timestamp,
+          action: {
+            label: "Xem chi tiết",
+            type: "VIEW_DETAILS",
+            payload: { orderId },
+          },
+        };
+        break;
+
+      case "CANCEL_ORDER":
+        notification = {
+          id,
+          type: "CANCEL_ORDER",
+          title: "Đơn hàng bị hủy",
+          message: `Đơn hàng #${orderId} đã bị hủy`,
+          data: {
+            orderId,
+            table,
+            order: {
+              type: "reservation",
+              status: "cancelled",
+            },
+            customerId,
+            username,
+          },
+          timestamp,
+          action: {
+            label: "Xem chi tiết",
+            type: "VIEW_DETAILS",
+            payload: { orderId },
+          },
+        };
+        break;
+
+      case "CONFIRM_ORDER":
+        notification = {
+          id,
+          type: "CONFIRM_ORDER",
+          title: "Đơn hàng được xác nhận",
+          message: `Đơn hàng #${orderId} đã được xác nhận`,
+          data: {
+            orderId,
+            table,
+            order: {
+              type: "reservation",
+              status: "confirmed",
+            },
+            customerId,
+            username,
+          },
+          timestamp,
+          action: {
+            label: "Xem chi tiết",
+            type: "VIEW_DETAILS",
+            payload: { orderId },
+          },
+        };
+        break;
+
+      case "PAYMENT_SUCCESS":
+        notification = {
+          id,
+          type: "PAYMENT_SUCCESS",
+          title: "Thanh toán thành công",
+          message: `Đơn hàng #${orderId} đã được thanh toán với số tiền 170,000 VND`,
+          data: {
+            orderId,
+            table,
+            payment: {
+              accountName: "Nguyen Van A",
+              amount: 170000,
+              transactionTime: timestamp,
+            },
+            customerId,
+            username,
+          },
+          timestamp,
+          action: {
+            label: "Xem chi tiết",
+            type: "VIEW_DETAILS",
+            payload: { orderId },
+          },
+        };
+        break;
+
+      default:
+        throw new Error("Loại thông báo không hợp lệ!");
+    }
+
+    // Log dữ liệu gửi đi
     console.log(
-      `[Socket.IO] Emitted newOrder to adminRoom for test order ${notification.orderId}`
+      "[testNewOrder2] Dữ liệu thông báo gửi đi:",
+      JSON.stringify(notification, null, 2)
     );
 
-    // (Tùy chọn) Gửi sự kiện admintest nếu cần
-    // io.to("adminRoom").emit("admintest", notification);
-    // console.log(
-    //   `[Socket.IO] Emitted admintest to adminRoom for test order ${notification.orderId}`
-    // );
+    // Gửi sự kiện notification đến adminRoom
+    io.to("adminRoom").emit("notification", notification);
+    console.log(
+      `[Socket.IO] Emitted notification to adminRoom for order ${notification.data.orderId}`
+    );
 
+    // Kiểm tra số client trong adminRoom
+    io.in("adminRoom")
+      .allSockets()
+      .then((sockets) => {
+        console.log(`[Socket.IO] Clients in adminRoom: ${sockets.size}`);
+      });
+
+    // Trả về response
     res.json({
       status: "SUCCESS",
       message: "Thông báo test đơn hàng gửi thành công",
       data: notification,
     });
   } catch (error) {
-    console.error("[testNewOrder] Error:", error.message);
+    console.error("[testNewOrder2] Error:", error.message);
     res.status(500).json({
       status: "ERROR",
       message: error.message || "Lỗi khi gửi thông báo test đơn hàng!",
@@ -2343,14 +2851,17 @@ const payOrder = async (req, res) => {
       return res.status(400).json({
         status: "ERROR",
         message: "Yêu cầu phải có order_id hợp lệ!",
-        data: ""
+        data: "",
       });
     }
-    if (!payment_method || !["cash", "bank_transfer"].includes(payment_method)) {
+    if (
+      !payment_method ||
+      !["cash", "bank_transfer"].includes(payment_method)
+    ) {
       return res.status(400).json({
         status: "ERROR",
         message: "Phương thức thanh toán phải là 'cash' hoặc 'bank_transfer'!",
-        data: ""
+        data: "",
       });
     }
 
@@ -2360,21 +2871,21 @@ const payOrder = async (req, res) => {
       return res.status(404).json({
         status: "ERROR",
         message: "Không tìm thấy đơn hàng!",
-        data: ""
+        data: "",
       });
     }
     if (order.status !== "confirmed") {
       return res.status(400).json({
         status: "ERROR",
         message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
-        data: ""
+        data: "",
       });
     }
     if (order.payment_status === "success") {
       return res.status(400).json({
         status: "ERROR",
         message: "Đơn hàng đã được thanh toán!",
-        data: ""
+        data: "",
       });
     }
 
@@ -2396,7 +2907,9 @@ const payOrder = async (req, res) => {
     );
 
     // Cập nhật end_time trong ReservationTable
-    const reservation = await ReservedTable.findOne({ reservation_id: order_id }).session(session);
+    const reservation = await ReservedTable.findOne({
+      reservation_id: order_id,
+    }).session(session);
     if (reservation) {
       const currentTime = new Date();
       const endTime = new Date(currentTime.getTime() - 60 * 1000);
@@ -2422,14 +2935,14 @@ const payOrder = async (req, res) => {
     return res.status(200).json({
       status: "SUCCESS",
       message: "Thanh toán đơn hàng và cập nhật trạng thái bàn thành công!",
-      data: ""
+      data: "",
     });
   } catch (error) {
     await session.abortTransaction();
     return res.status(500).json({
       status: "ERROR",
       message: error.message || "Đã xảy ra lỗi khi xử lý thanh toán!",
-      data: ""
+      data: "",
     });
   } finally {
     session.endSession();
@@ -2455,6 +2968,6 @@ module.exports = {
   addItemsToOrder,
   cancelItems,
   payOrder,
-  testNewOrder,
+  testNewOrder1,
   testNewOrder2,
 };

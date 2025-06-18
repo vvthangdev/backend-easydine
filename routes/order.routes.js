@@ -92,7 +92,7 @@ router.post(
   orderController.payOrder
 );
 
-router.get("/test01", orderController.testNewOrder);
+router.get("/test01", orderController.testNewOrder1);
 
 router.get("/test02", orderController.testNewOrder2);
 
