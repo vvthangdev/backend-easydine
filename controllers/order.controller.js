@@ -2199,14 +2199,7 @@ const addItemsToOrder = async (req, res) => {
       id: `notif_${Date.now()}`,
       type: "ORDER_ITEMS_UPDATE",
       title: "Món ăn được thêm vào đơn hàng",
-      message: `Đã thêm món vào đơn hàng cho bàn ${tableInfo}: ${items
-        .map(
-          (i) =>
-            `${i.quantity} x ${itemMap.get(i.id)?.name || i.id}${
-              i.size ? ` (${i.size})` : ""
-            }`
-        )
-        .join(", ")}`,
+      message: `Đã thêm món vào đơn hàng cho bàn ${tableInfo}`,
       data: {
         orderId: order._id.toString(),
         type: order.type,
@@ -2488,14 +2481,7 @@ const cancelItems = async (req, res) => {
       id: `notif_${Date.now()}`,
       type: "ORDER_ITEMS_UPDATE",
       title: "Món ăn bị hủy khỏi đơn hàng",
-      message: `Đã hủy món khỏi đơn hàng cho bàn ${tableInfo}: ${items
-        .map(
-          (i) =>
-            `${i.quantity} x ${itemMap.get(i.item_id)?.name || i.item_id}${
-              i.size ? ` (${i.size})` : ""
-            }`
-        )
-        .join(", ")}`,
+      message: `Đã hủy món khỏi đơn hàng cho bàn ${tableInfo}`,
       data: {
         orderId: order._id.toString(),
         type: order.type,
@@ -2563,6 +2549,118 @@ const cancelItems = async (req, res) => {
     session.endSession();
   }
 };
+
+
+
+const payOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { order_id, payment_method } = req.body;
+
+    // Kiểm tra đầu vào
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Yêu cầu phải có order_id hợp lệ!",
+        data: "",
+      });
+    }
+    if (
+      !payment_method ||
+      !["cash", "bank_transfer"].includes(payment_method)
+    ) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Phương thức thanh toán phải là 'cash' hoặc 'bank_transfer'!",
+        data: "",
+      });
+    }
+
+    // Kiểm tra đơn hàng
+    const order = await OrderDetail.findById(order_id).session(session);
+    if (!order) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Không tìm thấy đơn hàng!",
+        data: "",
+      });
+    }
+    if (order.status !== "confirmed") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
+        data: "",
+      });
+    }
+    if (order.payment_status === "success") {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Đơn hàng đã được thanh toán!",
+        data: "",
+      });
+    }
+
+    // Cập nhật số tiền đơn hàng bằng hàm updateOrderAmounts
+    await orderService.updateOrderAmounts(order_id, session);
+
+    // Cập nhật thông tin đơn hàng
+    await OrderDetail.findByIdAndUpdate(
+      order_id,
+      {
+        cashier_id: req.user._id,
+        payment_method,
+        status: "completed",
+        payment_status: "success",
+        payment_initiated_at: new Date(),
+        transaction_id: `TX-${order_id}-${Date.now()}`,
+      },
+      { session }
+    );
+
+    // Cập nhật end_time trong ReservationTable
+    const reservation = await ReservedTable.findOne({
+      reservation_id: order_id,
+    }).session(session);
+    if (reservation) {
+      const currentTime = new Date();
+      const endTime = new Date(currentTime.getTime() - 60 * 1000);
+      await ReservedTable.findOneAndUpdate(
+        { reservation_id: order_id },
+        { end_time: endTime },
+        { session }
+      );
+    }
+
+    // Hoàn tất giao dịch
+    await session.commitTransaction();
+
+    // Gửi thông báo Socket.IO
+    const io = socket.getIO();
+    io.to("adminRoom").emit("orderPaid", {
+      orderId: order_id,
+      payment_method,
+      status: "completed",
+      message: `Đơn hàng ${order_id} đã được thanh toán bằng ${payment_method}`,
+    });
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Thanh toán đơn hàng và cập nhật trạng thái bàn thành công!",
+      data: "",
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Đã xảy ra lỗi khi xử lý thanh toán!",
+      data: "",
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
 
 const testNewOrder1 = async (req, res) => {
   try {
@@ -2840,112 +2938,71 @@ const testNewOrder2 = async (req, res) => {
   }
 };
 
-const payOrder = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+
+const testNewOrder3 = async (req, res) => {
   try {
-    const { order_id, payment_method } = req.body;
+    const { tableId } = req.params; // Lấy tableId từ params
 
-    // Kiểm tra đầu vào
-    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+    // Kiểm tra tính hợp lệ của tableId
+    if (!mongoose.Types.ObjectId.isValid(tableId)) {
       return res.status(400).json({
         status: "ERROR",
-        message: "Yêu cầu phải có order_id hợp lệ!",
-        data: "",
-      });
-    }
-    if (
-      !payment_method ||
-      !["cash", "bank_transfer"].includes(payment_method)
-    ) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Phương thức thanh toán phải là 'cash' hoặc 'bank_transfer'!",
-        data: "",
+        message: "tableId không hợp lệ!",
+        data: null,
       });
     }
 
-    // Kiểm tra đơn hàng
-    const order = await OrderDetail.findById(order_id).session(session);
-    if (!order) {
+    // Lấy thông tin bàn từ TableInfo
+    const tableInfo = await TableInfo.findById(tableId).lean();
+    if (!tableInfo) {
       return res.status(404).json({
         status: "ERROR",
-        message: "Không tìm thấy đơn hàng!",
-        data: "",
+        message: "Bàn không tồn tại!",
+        data: null,
       });
     }
-    if (order.status !== "confirmed") {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Chỉ các đơn hàng đã xác nhận mới có thể thanh toán!",
-        data: "",
-      });
-    }
-    if (order.payment_status === "success") {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Đơn hàng đã được thanh toán!",
-        data: "",
-      });
-    }
-
-    // Cập nhật số tiền đơn hàng bằng hàm updateOrderAmounts
-    await orderService.updateOrderAmounts(order_id, session);
-
-    // Cập nhật thông tin đơn hàng
-    await OrderDetail.findByIdAndUpdate(
-      order_id,
-      {
-        cashier_id: req.user._id,
-        payment_method,
-        status: "completed",
-        payment_status: "success",
-        payment_initiated_at: new Date(),
-        transaction_id: `TX-${order_id}-${Date.now()}`,
-      },
-      { session }
-    );
-
-    // Cập nhật end_time trong ReservationTable
-    const reservation = await ReservedTable.findOne({
-      reservation_id: order_id,
-    }).session(session);
-    if (reservation) {
-      const currentTime = new Date();
-      const endTime = new Date(currentTime.getTime() - 60 * 1000);
-      await ReservedTable.findOneAndUpdate(
-        { reservation_id: order_id },
-        { end_time: endTime },
-        { session }
-      );
-    }
-
-    // Hoàn tất giao dịch
-    await session.commitTransaction();
 
     // Gửi thông báo Socket.IO
     const io = socket.getIO();
-    io.to("adminRoom").emit("orderPaid", {
-      orderId: order_id,
-      payment_method,
-      status: "completed",
-      message: `Đơn hàng ${order_id} đã được thanh toán bằng ${payment_method}`,
-    });
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "CALL_STAFF",
+      title: "Yêu cầu nhân viên",
+      message: `Bàn ${tableInfo.table_number || "N/A"} (${
+        tableInfo.area || "N/A"
+      }) yêu cầu nhân viên`,
+      data: {
+        orderId: "",
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { tableId: tableId },
+      },
+    };
+    io.to("adminRoom").emit("notification", notification);
+    console.log(
+      `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
+    );
 
-    return res.status(200).json({
+    // Trả về response
+    res.json({
       status: "SUCCESS",
-      message: "Thanh toán đơn hàng và cập nhật trạng thái bàn thành công!",
-      data: "",
+      message: "Thông báo yêu cầu nhân viên gửi thành công",
+      data: notification,
     });
   } catch (error) {
-    await session.abortTransaction();
-    return res.status(500).json({
+    console.error("[testNewOrder3] Error:", error.message);
+    res.status(500).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi xử lý thanh toán!",
-      data: "",
+      message: error.message || "Lỗi khi gửi thông báo yêu cầu nhân viên!",
+      data: null,
     });
-  } finally {
-    session.endSession();
   }
 };
 
@@ -2970,4 +3027,5 @@ module.exports = {
   payOrder,
   testNewOrder1,
   testNewOrder2,
+  testNewOrder3
 };
