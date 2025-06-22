@@ -80,4 +80,6 @@ router.post(
   userController.changePassword
 );
 
+router.post("/auth/google/firebase", userController.googleFirebaseLogin);
+
 module.exports = router;

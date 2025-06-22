@@ -7,6 +7,11 @@ const session = require("express-session");
 const passport = require("passport");
 // const socketModule = require("./socket/index.js");
 const socket = require ("./socket/socket.js")
+const admin = require("firebase-admin");
+
+
+
+
 
 // Khởi tạo Express app và HTTP server
 const app = express();
@@ -17,10 +22,13 @@ const upload = multer();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+
 // Tải biến môi trường
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
 
 // app.use(
 //   cors({
@@ -48,7 +56,10 @@ app.use(
   })
 );
 
-// Cấu hình Passport
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 app.use(passport.initialize());
 app.use(passport.session());
 require("./config/passport")(passport);

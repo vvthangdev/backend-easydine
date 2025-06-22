@@ -1,3 +1,4 @@
+const admin = require("firebase-admin");
 const User = require("../models/user.model.js");
 require("dotenv").config();
 const userService = require("../services/user.service");
@@ -528,6 +529,98 @@ const changePassword = async (req, res) => {
   }
 };
 
+const googleFirebaseLogin = async (req, res) => {
+    console.log("Google Firebase Login request:", req.body);
+    try {
+        const { idToken } = req.body;
+        if (!idToken) {
+            console.error("Missing idToken");
+            return res.status(400).json({
+                status: "ERROR",
+                message: "Missing idToken",
+                data: null,
+            });
+        }
+
+        console.log("Verifying idToken...");
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        console.log("Decoded token:", decodedToken);
+        const { email, name, sub: googleId } = decodedToken;
+
+        // Kiểm tra người dùng bằng googleId hoặc email
+        let user = await User.findOne({
+            $or: [{ googleId }, { email }],
+        });
+
+        if (!user) {
+            console.log("Creating new user with data:", {
+                email,
+                name,
+                googleId,
+                username: email.split("@")[0],
+                password: "12345678",
+                isActive: true,
+            });
+            user = await userService.createUser({
+                email,
+                name,
+                googleId,
+                username: email.split("@")[0],
+                password: "12345678",
+                isActive: true,
+            });
+            console.log("New user created:", user);
+        } else if (!user.googleId) {
+            // Nếu tài khoản tồn tại qua email nhưng không có googleId, liên kết googleId
+            console.log(`Linking Google ID to existing user with email: ${email}`);
+            user.googleId = googleId;
+            await user.save();
+        }
+
+        const dataForAccessToken = {
+            _id: user._id.toString(),
+            username: user.username,
+            role: user.role,
+        };
+
+        const accessToken = await authUtil.generateToken(
+            dataForAccessToken,
+            process.env.ACCESS_TOKEN_SECRET,
+            process.env.ACCESS_TOKEN_LIFE
+        );
+
+        let refreshToken =
+            user.refresh_token ||
+            (await authUtil.generateToken(
+                dataForAccessToken,
+                process.env.REFRESH_TOKEN_SECRET,
+                process.env.REFRESH_TOKEN_LIFE
+            ));
+
+        if (!user.refresh_token) {
+            await userService.updateRefreshToken(user.username, refreshToken);
+        }
+
+        const userData = userDto.userResponseDTO(user);
+        return res.status(200).json({
+            status: "SUCCESS",
+            message: "Google login successful!",
+            data: {
+                ...userData,
+                accessToken: `Bearer ${accessToken}`,
+                refreshToken: `Bearer ${refreshToken}`,
+            },
+        });
+    } catch (error) {
+        console.error("Error in Google Firebase login:", error);
+        return res.status(500).json({
+            status: "ERROR",
+            message: "Error in Google Firebase login",
+            data: null,
+        });
+    }
+};
+
 module.exports = {
   getAllUsers,
   userInfo,
@@ -542,4 +635,5 @@ module.exports = {
   getUserById,
   googleLoginCallback,
   changePassword,
+  googleFirebaseLogin,
 };
