@@ -19,31 +19,27 @@ const mongoose = require("mongoose");
 const createOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  let orderResponse;
+
   try {
     const { start_time, tables, items, ...orderData } = req.body;
 
     // Kiểm tra dữ liệu đầu vào
     if (!start_time) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Yêu cầu phải có start_time!",
-        data: null,
-      });
+      throw new Error("Yêu cầu phải có start_time!");
     }
     if (orderData.type === "reservation" && (!tables || tables.length === 0)) {
-      return res.status(400).json({
-        status: "ERROR",
-        message: "Đặt bàn phải có ít nhất một bàn!",
-        data: null,
-      });
+      throw new Error("Đặt bàn phải có ít nhất một bàn!");
     }
-    // Tính endTime từ start_time và offset từ .env
+
+    // Tính endTime
     const startTime = new Date(start_time);
     const reservationDuration =
       parseInt(process.env.RESERVATION_DURATION_MINUTES) || 240;
     const endTime = new Date(
       startTime.getTime() + reservationDuration * 60 * 1000
     );
+
     // Kiểm tra tính hợp lệ của table_id
     if (orderData.type === "reservation") {
       for (const tableId of tables) {
@@ -53,7 +49,7 @@ const createOrder = async (req, res) => {
       }
     }
 
-    // Tạo dữ liệu đơn hàng mới
+    // Tạo dữ liệu đơn hàng
     const newOrderData = {
       customer_id: req.user._id,
       time: new Date(start_time),
@@ -66,7 +62,7 @@ const createOrder = async (req, res) => {
     // Tạo đơn hàng
     const newOrder = await orderService.createOrder(newOrderData, { session });
 
-    // Xử lý đặt bàn nếu là reservation
+    // Xử lý đặt bàn
     if (orderData.type === "reservation") {
       const tableInfos = await TableInfo.find({ _id: { $in: tables } }).session(
         session
@@ -93,14 +89,14 @@ const createOrder = async (req, res) => {
       await orderService.createReservations(reservedTables, { session });
     }
 
-    // Xử lý các mục hàng (items) nếu có
+    // Xử lý items
     if (items && items.length > 0) {
       const itemIds = items.map((item) => new mongoose.Types.ObjectId(item.id));
       const foundItems = await Item.find({ _id: { $in: itemIds } }).session(
         session
       );
       const itemMap = new Map(
-        foundItems.map((item) => [item._id.toString(), item])
+        foundItems.map((item) => [item.id.toString(), item])
       );
 
       for (const item of items) {
@@ -115,10 +111,10 @@ const createOrder = async (req, res) => {
           throw new Error(`Mục hàng với ID ${item.id} không tồn tại!`);
         }
         if (item.size) {
-          const validSize = itemExists.sizes.find((s) => s.name === item.size);
+          const validSize = itemExists.sizes.find((s) => s.size === item.size);
           if (!validSize) {
             throw new Error(
-              `Kích thước ${item.size} không hợp lệ cho mục hàng ${itemExists.name}!`
+              `Kích thước ${item.size} không hợp lệ cho mục hàng mục ${itemExists.name}!`
             );
           }
         }
@@ -134,59 +130,74 @@ const createOrder = async (req, res) => {
       await orderService.createItemOrders(itemOrders, { session });
     }
 
-    // Cập nhật số tiền đơn hàng trong cùng giao dịch
+    // Cập nhật số tiền
     await orderService.updateOrderAmounts(newOrder._id, session);
 
-    // Chuyển newOrder thành đối tượng JavaScript và thêm danh sách bàn
-    const orderResponse = newOrder.toObject(); // Chuyển Mongoose document thành plain object
+    // Chuẩn bị orderResponse
+    orderResponse = newOrder.toObject();
     if (orderData.type === "reservation") {
-      orderResponse.tables = tables; // Thêm danh sách table_id
-      // Lấy thêm thông tin chi tiết về bàn (table_number, area)
+      orderResponse.tables = tables;
       const tableInfos = await TableInfo.find({ _id: { $in: tables } })
         .select("table_number area")
         .lean()
         .session(session);
-      orderResponse.tableDetails = tableInfos; // Thêm thông tin chi tiết về bàn
+      orderResponse.tableDetails = tableInfos;
     }
 
-    // Hoàn tất giao dịch
+    // Xác nhận giao dịch
     await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "Đã xảy ra lỗi khi tạo đơn hàng!",
+      data: null,
+    });
+  } finally {
+    session.endSession();
+  }
 
-    // Chuẩn bị phản hồi
-    const response = {
-      status: "SUCCESS",
-      message: "Tạo đơn hàng thành công!",
-      data: orderResponse,
-    };
-
-    // Gửi thông báo Socket.IO với orderResponse đã có danh sách bàn
-    const io = socket.getIO();
-    const notification = {
-      id: `notif_${Date.now()}`,
-      type: "CREATE_ORDER",
-      title: "Đơn hàng mới được tạo",
-      message: `Đơn hàng mới được tạo cho bàn ${
-        orderResponse.tableDetails[0]?.table_number || "N/A"
-      } (${orderResponse.tableDetails[0]?.area || "N/A"})`,
-      data: {
-        orderId: orderResponse._id.toString(),
-      },
-      timestamp: new Date().toISOString(),
-      action: {
-        label: "Xem chi tiết",
-        type: "VIEW_DETAILS",
-        payload: { orderId: orderResponse._id.toString() },
-      },
-    };
-    io.to("adminRoom").emit("notification", notification);
-    console.log(
-      `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
-        notification,
-        null,
-        2
-      )}`
-    );
-
+  // Thực hiện các thao tác không liên quan đến giao dịch
+  try {
+    // Gửi thông báo Socket.IO
+    try {
+      // Gửi thông báo Socket.IO
+      const io = socket.getIO();
+      const notification = {
+        id: `notif_${Date.now()}`,
+        type: "CREATE_ORDER",
+        title: "Đơn hàng mới được tạo",
+        message:
+          orderResponse.type === "reservation" &&
+          orderResponse.tableDetails?.length
+            ? `Đơn hàng mới được tạo cho bàn ${
+                orderResponse.tableDetails[0].table_number || "N/A"
+              } (${orderResponse.tableDetails[0].area || "N/A"})`
+            : `Đơn hàng mới được tạo (${
+                orderResponse.type === "takeaway" ? "Mang đi" : "Tại chỗ"
+              })`,
+        data: {
+          orderId: orderResponse._id.toString(),
+        },
+        timestamp: new Date().toISOString(),
+        action: {
+          label: "Xem chi tiết",
+          type: "VIEW_DETAILS",
+          payload: { orderId: orderResponse._id.toString() },
+        },
+      };
+      io.to("adminRoom").emit("notification", notification);
+      console.log(
+        `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
+          notification,
+          null,
+          2
+        )}`
+      );
+    } catch (error) {
+      console.error("Lỗi gửi thông báo Socket.IO:", error.message);
+      // Tiếp tục xử lý, không làm gián đoạn phản hồi
+    }
     // Gửi email xác nhận
     setImmediate(async () => {
       try {
@@ -201,17 +212,20 @@ const createOrder = async (req, res) => {
       }
     });
 
-    // Trả về phản hồi cho client
-    return res.status(201).json(response);
+    return res.status(201).json({
+      status: "SUCCESS",
+      message: "Tạo đơn hàng thành công!",
+      data: orderResponse,
+    });
   } catch (error) {
-    await session.abortTransaction();
+    // Xử lý lỗi không liên quan đến giao dịch
     return res.status(500).json({
       status: "ERROR",
-      message: error.message || "Đã xảy ra lỗi khi tạo đơn hàng!",
-      data: null,
+      message:
+        "Đơn hàng đã được tạo nhưng có lỗi trong quá trình xử lý bổ sung: " +
+        error.message,
+      data: orderResponse,
     });
-  } finally {
-    session.endSession();
   }
 };
 
@@ -2550,8 +2564,6 @@ const cancelItems = async (req, res) => {
   }
 };
 
-
-
 const payOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -2660,7 +2672,6 @@ const payOrder = async (req, res) => {
     session.endSession();
   }
 };
-
 
 const testNewOrder1 = async (req, res) => {
   try {
@@ -2938,7 +2949,6 @@ const testNewOrder2 = async (req, res) => {
   }
 };
 
-
 const testNewOrder3 = async (req, res) => {
   try {
     const { tableId } = req.params; // Lấy tableId từ params
@@ -3027,5 +3037,5 @@ module.exports = {
   payOrder,
   testNewOrder1,
   testNewOrder2,
-  testNewOrder3
+  testNewOrder3,
 };
