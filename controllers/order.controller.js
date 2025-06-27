@@ -2891,216 +2891,283 @@ const testNewOrder1 = async (req, res) => {
   }
 };
 
+// const testNewOrder2 = async (req, res) => {
+//   try {
+//     const io = socket.getIO(); // Lấy instance io
+//     const { type = "ADD_ITEM" } = req.body; // Lấy type từ body JSON
+
+//     // Dữ liệu giả lập thông báo
+//     let notification;
+//     const orderId = "test123";
+//     const customerId = req.user?._id || "6811ff6de5541de1a1e96b1d";
+//     const username = req.user?.username || "testUser";
+//     const table = {
+//       tableNumber: 101,
+//       area: "Tầng 2",
+//     };
+//     const timestamp = new Date().toISOString();
+//     const id = `notif_${Date.now()}`;
+
+//     switch (type) {
+//       case "CREATE_ORDER":
+//         notification = {
+//           id,
+//           type: "CREATE_ORDER",
+//           title: "Khách hàng yêu cầu thanh toán",
+//           message: `Khách hàng đang yêu cầu thanh toán cho bàn: ${table.tableNumber} (${table.area})`,
+//           data: {
+//             orderId,
+//             table,
+//             order: {
+//               type: "reservation",
+//               status: "pending", // Thay confirmed thành pending để đúng ngữ cảnh
+//             },
+//             item: {
+//               itemName: "Bia heineken",
+//               quantity: 1,
+//               note: "Không đá",
+//             },
+//             customerId,
+//             username,
+//           },
+//           timestamp,
+//           action: {
+//             label: "Xem chi tiết",
+//             type: "VIEW_DETAILS",
+//             payload: { orderId },
+//           },
+//         };
+//         break;
+
+//       case "ADD_ITEM":
+//         notification = {
+//           id,
+//           type: "ADD_ITEM",
+//           title: "Món mới được thêm",
+//           message: `Món Bia heineken (x1) đã được thêm vào đơn hàng #${orderId}`,
+//           data: {
+//             orderId,
+//             table,
+//             item: {
+//               itemName: "Bia heineken",
+//               quantity: 1,
+//               note: "Không đá",
+//             },
+//             customerId,
+//             username,
+//           },
+//           timestamp,
+//           action: {
+//             label: "Xem chi tiết",
+//             type: "VIEW_DETAILS",
+//             payload: { orderId },
+//           },
+//         };
+//         break;
+
+//       case "DELETE_ITEM":
+//         notification = {
+//           id,
+//           type: "DELETE_ITEM",
+//           title: "Món đã bị hủy",
+//           message: `Món Đậu luộc (x1) đã bị hủy khỏi đơn hàng #${orderId}`,
+//           data: {
+//             orderId,
+//             table,
+//             item: {
+//               itemName: "Đậu luộc",
+//               quantity: 1,
+//               note: "",
+//             },
+//             customerId,
+//             username,
+//           },
+//           timestamp,
+//           action: {
+//             label: "Xem chi tiết",
+//             type: "VIEW_DETAILS",
+//             payload: { orderId },
+//           },
+//         };
+//         break;
+
+//       case "CANCEL_ORDER":
+//         notification = {
+//           id,
+//           type: "CANCEL_ORDER",
+//           title: "Đơn hàng bị hủy",
+//           message: `Đơn hàng #${orderId} đã bị hủy`,
+//           data: {
+//             orderId,
+//             table,
+//             order: {
+//               type: "reservation",
+//               status: "cancelled",
+//             },
+//             customerId,
+//             username,
+//           },
+//           timestamp,
+//           action: {
+//             label: "Xem chi tiết",
+//             type: "VIEW_DETAILS",
+//             payload: { orderId },
+//           },
+//         };
+//         break;
+
+//       case "CONFIRM_ORDER":
+//         notification = {
+//           id,
+//           type: "CONFIRM_ORDER",
+//           title: "Đơn hàng được xác nhận",
+//           message: `Đơn hàng #${orderId} đã được xác nhận`,
+//           data: {
+//             orderId,
+//             table,
+//             order: {
+//               type: "reservation",
+//               status: "confirmed",
+//             },
+//             customerId,
+//             username,
+//           },
+//           timestamp,
+//           action: {
+//             label: "Xem chi tiết",
+//             type: "VIEW_DETAILS",
+//             payload: { orderId },
+//           },
+//         };
+//         break;
+
+//       case "PAYMENT_SUCCESS":
+//         notification = {
+//           id,
+//           type: "PAYMENT_SUCCESS",
+//           title: "Thanh toán thành công",
+//           message: `Đơn hàng #${orderId} đã được thanh toán với số tiền 170,000 VND`,
+//           data: {
+//             orderId,
+//             table,
+//             payment: {
+//               accountName: "Nguyen Van A",
+//               amount: 170000,
+//               transactionTime: timestamp,
+//             },
+//             customerId,
+//             username,
+//           },
+//           timestamp,
+//           action: {
+//             label: "Xem chi tiết",
+//             type: "VIEW_DETAILS",
+//             payload: { orderId },
+//           },
+//         };
+//         break;
+
+//       default:
+//         throw new Error("Loại thông báo không hợp lệ!");
+//     }
+
+//     // Log dữ liệu gửi đi
+//     console.log(
+//       "[testNewOrder2] Dữ liệu thông báo gửi đi:",
+//       JSON.stringify(notification, null, 2)
+//     );
+
+//     // Gửi sự kiện notification đến adminRoom
+//     io.to("adminRoom").emit("notification", notification);
+//     console.log(
+//       `[Socket.IO] Emitted notification to adminRoom for order ${notification.data.orderId}`
+//     );
+
+//     // Kiểm tra số client trong adminRoom
+//     io.in("adminRoom")
+//       .allSockets()
+//       .then((sockets) => {
+//         console.log(`[Socket.IO] Clients in adminRoom: ${sockets.size}`);
+//       });
+
+//     // Trả về response
+//     res.json({
+//       status: "SUCCESS",
+//       message: "Thông báo test đơn hàng gửi thành công",
+//       data: notification,
+//     });
+//   } catch (error) {
+//     console.error("[testNewOrder2] Error:", error.message);
+//     res.status(500).json({
+//       status: "ERROR",
+//       message: error.message || "Lỗi khi gửi thông báo test đơn hàng!",
+//     });
+//   }
+// };
+
 const testNewOrder2 = async (req, res) => {
   try {
-    const io = socket.getIO(); // Lấy instance io
-    const { type = "ADD_ITEM" } = req.body; // Lấy type từ body JSON
+    const { tableId } = req.params; // Lấy tableId từ params
 
-    // Dữ liệu giả lập thông báo
-    let notification;
-    const orderId = "test123";
-    const customerId = req.user?._id || "6811ff6de5541de1a1e96b1d";
-    const username = req.user?.username || "testUser";
-    const table = {
-      tableNumber: 101,
-      area: "Tầng 2",
-    };
-    const timestamp = new Date().toISOString();
-    const id = `notif_${Date.now()}`;
-
-    switch (type) {
-      case "CREATE_ORDER":
-        notification = {
-          id,
-          type: "CREATE_ORDER",
-          title: "Đơn hàng mới được tạo",
-          message: `Đơn hàng #${orderId} đã được tạo cho bàn ${table.tableNumber} (${table.area})`,
-          data: {
-            orderId,
-            table,
-            order: {
-              type: "reservation",
-              status: "pending", // Thay confirmed thành pending để đúng ngữ cảnh
-            },
-            item: {
-              itemName: "Bia heineken",
-              quantity: 1,
-              note: "Không đá",
-            },
-            customerId,
-            username,
-          },
-          timestamp,
-          action: {
-            label: "Xem chi tiết",
-            type: "VIEW_DETAILS",
-            payload: { orderId },
-          },
-        };
-        break;
-
-      case "ADD_ITEM":
-        notification = {
-          id,
-          type: "ADD_ITEM",
-          title: "Món mới được thêm",
-          message: `Món Bia heineken (x1) đã được thêm vào đơn hàng #${orderId}`,
-          data: {
-            orderId,
-            table,
-            item: {
-              itemName: "Bia heineken",
-              quantity: 1,
-              note: "Không đá",
-            },
-            customerId,
-            username,
-          },
-          timestamp,
-          action: {
-            label: "Xem chi tiết",
-            type: "VIEW_DETAILS",
-            payload: { orderId },
-          },
-        };
-        break;
-
-      case "DELETE_ITEM":
-        notification = {
-          id,
-          type: "DELETE_ITEM",
-          title: "Món đã bị hủy",
-          message: `Món Đậu luộc (x1) đã bị hủy khỏi đơn hàng #${orderId}`,
-          data: {
-            orderId,
-            table,
-            item: {
-              itemName: "Đậu luộc",
-              quantity: 1,
-              note: "",
-            },
-            customerId,
-            username,
-          },
-          timestamp,
-          action: {
-            label: "Xem chi tiết",
-            type: "VIEW_DETAILS",
-            payload: { orderId },
-          },
-        };
-        break;
-
-      case "CANCEL_ORDER":
-        notification = {
-          id,
-          type: "CANCEL_ORDER",
-          title: "Đơn hàng bị hủy",
-          message: `Đơn hàng #${orderId} đã bị hủy`,
-          data: {
-            orderId,
-            table,
-            order: {
-              type: "reservation",
-              status: "cancelled",
-            },
-            customerId,
-            username,
-          },
-          timestamp,
-          action: {
-            label: "Xem chi tiết",
-            type: "VIEW_DETAILS",
-            payload: { orderId },
-          },
-        };
-        break;
-
-      case "CONFIRM_ORDER":
-        notification = {
-          id,
-          type: "CONFIRM_ORDER",
-          title: "Đơn hàng được xác nhận",
-          message: `Đơn hàng #${orderId} đã được xác nhận`,
-          data: {
-            orderId,
-            table,
-            order: {
-              type: "reservation",
-              status: "confirmed",
-            },
-            customerId,
-            username,
-          },
-          timestamp,
-          action: {
-            label: "Xem chi tiết",
-            type: "VIEW_DETAILS",
-            payload: { orderId },
-          },
-        };
-        break;
-
-      case "PAYMENT_SUCCESS":
-        notification = {
-          id,
-          type: "PAYMENT_SUCCESS",
-          title: "Thanh toán thành công",
-          message: `Đơn hàng #${orderId} đã được thanh toán với số tiền 170,000 VND`,
-          data: {
-            orderId,
-            table,
-            payment: {
-              accountName: "Nguyen Van A",
-              amount: 170000,
-              transactionTime: timestamp,
-            },
-            customerId,
-            username,
-          },
-          timestamp,
-          action: {
-            label: "Xem chi tiết",
-            type: "VIEW_DETAILS",
-            payload: { orderId },
-          },
-        };
-        break;
-
-      default:
-        throw new Error("Loại thông báo không hợp lệ!");
+    // Kiểm tra tính hợp lệ của tableId
+    if (!mongoose.Types.ObjectId.isValid(tableId)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "tableId không hợp lệ!",
+        data: null,
+      });
     }
 
-    // Log dữ liệu gửi đi
-    console.log(
-      "[testNewOrder2] Dữ liệu thông báo gửi đi:",
-      JSON.stringify(notification, null, 2)
-    );
+    // Lấy thông tin bàn từ TableInfo
+    const tableInfo = await TableInfo.findById(tableId).lean();
+    if (!tableInfo) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Bàn không tồn tại!",
+        data: null,
+      });
+    }
 
-    // Gửi sự kiện notification đến adminRoom
+    // Gửi thông báo Socket.IO
+    const io = socket.getIO();
+    const notification = {
+      id: `notif_${Date.now()}`,
+      type: "CALL_STAFF",
+      title: "Yêu cầu nhân viên thanh toán",
+      message: `Bàn ${tableInfo.table_number || "N/A"} (${
+        tableInfo.area || "N/A"
+      }) yêu cầu nhân viên thanh toán`,
+      data: {
+        orderId: "",
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { tableId: tableId },
+      },
+    };
     io.to("adminRoom").emit("notification", notification);
     console.log(
-      `[Socket.IO] Emitted notification to adminRoom for order ${notification.data.orderId}`
+      `[Socket.IO] Emitted CREATE_ORDER notification: ${JSON.stringify(
+        notification,
+        null,
+        2
+      )}`
     );
-
-    // Kiểm tra số client trong adminRoom
-    io.in("adminRoom")
-      .allSockets()
-      .then((sockets) => {
-        console.log(`[Socket.IO] Clients in adminRoom: ${sockets.size}`);
-      });
 
     // Trả về response
     res.json({
       status: "SUCCESS",
-      message: "Thông báo test đơn hàng gửi thành công",
+      message: "Thông báo yêu cầu nhân viên gửi thành công",
       data: notification,
     });
   } catch (error) {
-    console.error("[testNewOrder2] Error:", error.message);
+    console.error("[testNewOrder3] Error:", error.message);
     res.status(500).json({
       status: "ERROR",
-      message: error.message || "Lỗi khi gửi thông báo test đơn hàng!",
+      message: error.message || "Lỗi khi gửi thông báo yêu cầu nhân viên!",
+      data: null,
     });
   }
 };
