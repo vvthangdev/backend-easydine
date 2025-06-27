@@ -22,6 +22,8 @@ router.post(
 
 router.post("/create-table-order",  orderController.createTableOrder);
 
+router.post("/rate-order", orderController.rateOrder)
+
 router.get(
   "/all-order-info",
   authMiddleware.authenticateToken,

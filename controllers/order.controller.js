@@ -4,6 +4,7 @@ const ReservedTable = require("../models/reservation_table.model");
 const TableInfo = require("../models/table_info.model");
 const ItemOrder = require("../models/item_order.model");
 const Item = require("../models/item.model");
+const Guest = require("../models/guest.model")
 const CanceledItemOrder = require("../models/canceled_item_order.model");
 const emailService = require("../services/send-email.service");
 const { getUserByUserId } = require("../services/user.service");
@@ -233,7 +234,7 @@ const createTableOrder = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { start_time, tables, items, ...orderData } = req.body;
+    const { start_time, tables, items, guest_info, ...orderData } = req.body;
 
     // Kiểm tra dữ liệu đầu vào
     if (!start_time) {
@@ -272,11 +273,29 @@ const createTableOrder = async (req, res) => {
       startTime.getTime() + reservationDuration * 60 * 1000
     );
 
+    // Tạo rating_pin
+    const ratingPin = Math.random().toString(36).substring(2, 8); // PIN 6 ký tự
+
+    // Tạo Guest nếu có guest_info
+    let guest = null;
+    if (guest_info && (guest_info.name || guest_info.phone || guest_info.email)) {
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // Hết hạn sau 7 ngày
+      guest = new Guest({
+        name: guest_info.name || null,
+        phone: guest_info.phone || null,
+        email: guest_info.email || null,
+        expires_at: expiresAt,
+      });
+      await guest.save({ session });
+    }
+
     // Tạo dữ liệu đơn hàng mới
     const newOrderData = {
-      customer_id: null, // Không yêu cầu customer_id
+      customer_id: null,
+      guest_id: guest ? guest._id : null, // Liên kết guest_id nếu có
       time: new Date(start_time),
       type: orderType,
+      rating_pin: ratingPin,
       ...orderData,
     };
     if (orderData.status === "confirmed" && req.user?._id) {
@@ -364,6 +383,34 @@ const createTableOrder = async (req, res) => {
       .lean()
       .session(session);
     orderResponse.tableDetails = tableInfosDetails;
+    orderResponse.rating_pin = ratingPin;
+    orderResponse.guest_info = guest ? {
+      name: guest.name,
+      phone: guest.phone,
+      email: guest.email,
+    } : null;
+
+    // Gửi thông báo qua email/SMS nếu có guest_info
+    if (guest && (guest.email || guest.phone)) {
+      const notificationMessage = `
+        Đơn hàng của bạn đã được tạo thành công! 
+        Mã đơn hàng: ${newOrder._id}
+        Mã đánh giá: ${ratingPin}
+        Thời gian: ${startTime.toLocaleString()}
+        Bàn: ${tableInfosDetails.map(t => `Bàn ${t.table_number} (${t.area})`).join(', ')}
+      `;
+      if (guest.email) {
+        await emailService.sendEmail({
+          to: guest.email,
+          subject: "Xác nhận đơn hàng",
+          text: notificationMessage,
+        });
+      }
+      // Giả định có smsService
+      // if (guest.phone) {
+      //   await smsService.sendSMS(guest.phone, notificationMessage);
+      // }
+    }
 
     await session.commitTransaction();
 
@@ -407,6 +454,114 @@ const createTableOrder = async (req, res) => {
     return res.status(500).json({
       status: "ERROR",
       message: error.message || "Đã xảy ra lỗi khi tạo đơn hàng bàn!",
+      data: null,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+const rateOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { order_id, star, comment, rating_pin } = req.body;
+    const user_id = req.user?._id;
+
+    // Validate input
+    if (!order_id || !mongoose.Types.ObjectId.isValid(order_id)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Valid order_id is required!",
+        data: null,
+      });
+    }
+    if (!star || !Number.isInteger(star) || star < 1 || star > 5) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Star must be an integer between 1 and 5!",
+        data: null,
+      });
+    }
+    if (comment && (typeof comment !== "string" || comment.length > 255)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Comment must be a string and not exceed 255 characters!",
+        data: null,
+      });
+    }
+
+    // Tìm đơn hàng
+    const order = await OrderDetail.findById(order_id).session(session).lean();
+    if (!order) {
+      return res.status(404).json({
+        status: "ERROR",
+        message: "Order not found!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra trạng thái
+    if (!["pending", "confirmed", "completed"].includes(order.status)) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Order cannot be rated in its current status!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra đã đánh giá
+    if (order.star !== null || order.comment !== null) {
+      return res.status(400).json({
+        status: "ERROR",
+        message: "Order has already been rated!",
+        data: null,
+      });
+    }
+
+    // Kiểm tra quyền
+    if (order.customer_id) {
+      if (!user_id || order.customer_id.toString() !== user_id.toString()) {
+        return res.status(403).json({
+          status: "ERROR",
+          message: "You are not authorized to rate this order!",
+          data: null,
+        });
+      }
+    } else {
+      if (!rating_pin || order.rating_pin !== rating_pin) {
+        return res.status(403).json({
+          status: "ERROR",
+          message: "Invalid rating PIN!",
+          data: null,
+        });
+      }
+    }
+
+    // Cập nhật đánh giá
+    const updatedOrder = await OrderDetail.findByIdAndUpdate(
+      order_id,
+      { star, comment: comment || null, updated_at: new Date() },
+      { new: true, runValidators: true, session }
+    ).lean();
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      status: "SUCCESS",
+      message: "Order rated successfully!",
+      data: {
+        order_id: updatedOrder._id,
+        star: updatedOrder.star,
+        comment: updatedOrder.comment,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Error in rateOrder:", error);
+    return res.status(500).json({
+      status: "ERROR",
+      message: error.message || "An error occurred while rating the order!",
       data: null,
     });
   } finally {
@@ -974,6 +1129,7 @@ const getOrderInfo = async (req, res) => {
         total_amount: order.total_amount,
         discount_amount: order.discount_amount,
         final_amount: order.final_amount,
+        rating_pin: order.rating_pin,
         payment_methods: order.payment_method
           ? [{ method: order.payment_method, amount: order.final_amount }]
           : [],
@@ -3022,6 +3178,7 @@ module.exports = {
   getOrderInfo,
   createOrder,
   createTableOrder,
+  rateOrder,
   reserveTable,
   updateOrder,
   getUserOrders,
