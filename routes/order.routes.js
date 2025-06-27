@@ -96,7 +96,7 @@ router.post(
 
 router.get("/test01", orderController.testNewOrder1);
 
-router.get("/test02", orderController.testNewOrder2);
+router.get("/table-cart-notification/:tableId", orderController.testNewOrder2);
 
 router.get("/table-notification/:tableId", orderController.testNewOrder3);
 
