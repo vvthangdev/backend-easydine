@@ -112,7 +112,7 @@ const createOrder = async (req, res) => {
           throw new Error(`Mục hàng với ID ${item.id} không tồn tại!`);
         }
         if (item.size) {
-          const validSize = itemExists.sizes.find((s) => s.size === item.size);
+          const validSize = itemExists.sizes.find((s) => s.name === item.size);
           if (!validSize) {
             throw new Error(
               `Kích thước ${item.size} không hợp lệ cho mục hàng mục ${itemExists.name}!`
