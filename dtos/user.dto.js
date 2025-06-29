@@ -95,6 +95,9 @@ const paymentWebhookSchema = Joi.object({
   soTaiKhoanDoiUng: Joi.string().optional().allow(''),
   ngayDienRa: Joi.date().iso().required(),
   giaTri: Joi.number().positive().required(),
+  maGD: Joi.string().optional().allow(''),
+  moTa: Joi.string().optional().allow(''),
+  maThamChieu: Joi.any().optional().allow(null, '')
 });
 
 // DTO cho dữ liệu người dùng

@@ -7,6 +7,8 @@ const { getIO } = require("../socket/socket.js");
 const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 const userDto = require("../dtos/user.dto");
+const moment = require('moment');
+const socket = require("../socket/socket");
 
 const createUserByAdmin = async (req, res) => {
   try {
@@ -335,8 +337,36 @@ const getAllStaff = async (req, res) => {
   }
 };
 
+
 const handlePaymentWebhook = async (req, res) => {
   try {
+    // Chuyển đổi định dạng ngày nếu có
+    if (req.body.ngayDienRa) {
+      const parsedDate = moment(req.body.ngayDienRa, "DD/MM/YYYY HH:mm", true);
+      if (parsedDate.isValid()) {
+        req.body.ngayDienRa = parsedDate.toISOString();
+      } else {
+        return res.status(400).json({
+          status: "ERROR",
+          message: '"ngayDienRa" must be in format DD/MM/YYYY HH:mm',
+        });
+      }
+    }
+
+    // Xử lý trường giaTri để loại bỏ " VND" và dấu chấm
+    if (req.body.giaTri && typeof req.body.giaTri === 'string') {
+      req.body.giaTri = parseFloat(req.body.giaTri.replace(/[^\d]/g, '')); // Chuyển "185.000 VND" thành 185000
+    }
+
+    // Xử lý trường soTaiKhoan để loại bỏ dấu nháy đơn và đổi tên thành soTaiKhoanDoiUng
+    if (req.body.soTaiKhoan && typeof req.body.soTaiKhoan === 'string') {
+      req.body.soTaiKhoanDoiUng = req.body.soTaiKhoan.replace(/['"]/g, '');
+      delete req.body.soTaiKhoan; // Xóa trường soTaiKhoan sau khi xử lý
+    }
+
+    // Log dữ liệu đầu vào sau khi xử lý
+    console.log(`[${new Date().toISOString()}] [Webhook] Processed request body:`, req.body);
+
     // Validate dữ liệu đầu vào
     const { error, value } = userDto.paymentWebhookSchema.validate(req.body);
     if (error) {
@@ -351,34 +381,49 @@ const handlePaymentWebhook = async (req, res) => {
       console.log(`[${new Date().toISOString()}] [Webhook] Order ${value.orderId} not found, still sending notification to adminRoom`);
     }
 
-    // Tạo thông báo
+    // Tạo thông báo Socket.IO
     const notification = {
+      id: `notif_${Date.now()}`,
       type: "PAYMENT_SUCCESS",
-      orderId: value.orderId,
-      customerId: order?.customer_id?.toString() || null,
-      accountName: value.tenTaiKhoanDoiUng || "Unknown",
-      accountNumber: value.soTaiKhoanDoiUng || "N/A",
-      transactionTime: value.ngayDienRa,
-      amount: value.giaTri,
-      message: `Payment successful for order ${value.orderId} at ${value.ngayDienRa} with amount ${value.giaTri}`,
-      createdAt: new Date().toISOString(),
+      title: "Thanh toán đơn hàng thành công",
+      message: order && order.type === "reservation" && order.tableDetails?.length
+        ? `Thanh toán thành công cho đơn hàng ${value.orderId} tại bàn ${order.tableDetails[0]?.table_number || "N/A"} (${order.tableDetails[0]?.area || "N/A"}) với số tiền ${value.giaTri}`
+        : `Thanh toán thành công cho đơn hàng ${value.orderId} (${order?.type === "takeaway" ? "Mang đi" : "Tại chỗ"}) với số tiền ${value.giaTri}`,
+      data: {
+        orderId: value.orderId,
+        amount: value.giaTri,
+        transactionTime: value.ngayDienRa,
+        maGD: value.maGD || "N/A",
+        moTa: value.moTa || "N/A",
+        maThamChieu: value.maThamChieu || null
+      },
+      timestamp: new Date().toISOString(),
+      action: {
+        label: "Xem chi tiết",
+        type: "VIEW_DETAILS",
+        payload: { orderId: value.orderId }
+      },
     };
 
     // Gửi thông báo qua Socket.IO
     const io = getIO();
-    console.log(`[${new Date().toISOString()}] [Webhook] Sending paymentSuccess notification:`, notification);
-
-    io.to("adminRoom").emit("paymentSuccess", userDto.paymentWebhookResponseDTO(notification));
+    console.log(`[${new Date().toISOString()}] [Webhook] Emitting PAYMENT_SUCCESS notification:`, JSON.stringify(notification, null, 2));
+    io.to("adminRoom").emit("notification", notification);
     if (order?.customer_id) {
-      io.to(`user:${order.customer_id}`).emit("paymentSuccess", userDto.paymentWebhookResponseDTO(notification));
+      io.to(`user:${order.customer_id}`).emit("notification", notification);
+      console.log(`[${new Date().toISOString()}] [Webhook] Sent notification to user:${order.customer_id}`);
     } else {
       console.log(`[${new Date().toISOString()}] [Webhook] No customerId found for order ${value.orderId}`);
     }
 
+    // Trả về toàn bộ dữ liệu từ value, thêm customerId từ order nếu có
     return res.status(200).json({
       status: "OK",
       message: "Webhook received and notification sent",
-      data: userDto.paymentWebhookResponseDTO(notification),
+      data: {
+        ...value,
+        customerId: order?.customer_id?.toString() || null
+      }
     });
   } catch (error) {
     console.error(`[${new Date().toISOString()}] [Webhook] Error processing webhook:`, error.message);
