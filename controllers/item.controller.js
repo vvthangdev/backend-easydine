@@ -102,12 +102,26 @@ const deleteCategory = async (req, res) => {
 
 const getAllItems = async (req, res) => {
   try {
-    const items = await Item.find().populate("categories");
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const items = await Item.find({})
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Item.countDocuments();
 
     return res.status(200).json({
       status: "SUCCESS",
       message: "Items retrieved successfully!",
       data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     console.error("Error fetching items:", error);

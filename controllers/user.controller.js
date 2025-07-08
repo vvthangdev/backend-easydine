@@ -10,15 +10,27 @@ const userDto = require("../dtos/user.dto.js")
 
 const getAllUsers = async (req, res) => {
   try {
-    const users = await userService.getAllUsers({
-      refresh_token: 0,
-      password: 0,
-    });
+    // Lấy tham số page và limit từ query
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    // Gọi service với phân trang
+    const { users, total } = await userService.getAllUsers(
+      { refresh_token: 0, password: 0 }, // Loại bỏ các trường nhạy cảm
+      page,
+      limit
+    );
 
     return res.status(200).json({
       status: "SUCCESS",
       message: "Lấy danh sách người dùng thành công!",
       data: users.map(userDto.userResponseDTO), // Chuẩn hóa đầu ra
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     console.error("Lỗi khi lấy danh sách người dùng:", error);

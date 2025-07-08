@@ -1160,14 +1160,32 @@ const getOrderInfo = async (req, res) => {
 
 const getAllOrders = async (req, res) => {
   try {
-    const orderDetail = await OrderDetail.find({});
+    // Lấy tham số page và limit từ query, mặc định page=1, limit=10
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Truy vấn với phân trang
+    const orderDetail = await OrderDetail.find({})
+      .skip(skip)
+      .limit(limit);
+
+    // Đếm tổng số bản ghi để trả về thông tin phân trang
+    const total = await OrderDetail.countDocuments();
 
     return res.status(200).json({
       status: "SUCCESS",
       message: "Orders retrieved successfully!",
       data: orderDetail,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
+    console.error("Error fetching orders:", error);
     return res.status(500).json({
       status: "ERROR",
       message: "An error occurred while fetching orders!",

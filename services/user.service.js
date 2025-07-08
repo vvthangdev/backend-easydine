@@ -1,11 +1,19 @@
 const bcrypt = require("bcrypt");
 const User = require("../models/user.model");
 
-async function getAllUsers(projection = {}) {
+async function getAllUsers(projection = {}, page = 1, limit = 10) {
   try {
-    const users = await User.find({}, projection);
+    const skip = (page - 1) * limit;
 
-    return users;
+    // Truy vấn với phân trang
+    const users = await User.find({}, projection)
+      .skip(skip)
+      .limit(limit);
+
+    // Đếm tổng số bản ghi
+    const total = await User.countDocuments();
+
+    return { users, total };
   } catch (error) {
     console.error("Error fetching all users:", error);
     throw new Error("Error fetching all users");

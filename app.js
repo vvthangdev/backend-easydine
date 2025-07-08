@@ -9,10 +9,6 @@ const passport = require("passport");
 const socket = require ("./socket/socket.js")
 const admin = require("firebase-admin");
 
-
-
-
-
 // Khởi tạo Express app và HTTP server
 const app = express();
 const server = createServer(app);
